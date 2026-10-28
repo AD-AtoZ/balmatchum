@@ -181,7 +181,7 @@ Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올�
 | `wear/` | 워치 앱. 화면(`presentation/screens/`), 안내 서비스, 위치, 진동, CSV 기록 |
 | `mobile/` | 휴대폰 앱. 목적지를 검색해 워치로 보내기 (만드는 중) |
 
-파일 위치는 [`TODOLIST.md`](TODOLIST.md) 맨 아래 부록에 표로 있습니다.
+파일 위치는 [`TODOLIST.md`](TODOLIST.md) 맨 아래 부록에 표로 있습니다. 기획 의도와 설계 근거는 [`docs/project.md`](docs/project.md)에 있습니다.
 
 **사용 기술**: Kotlin, Jetpack Compose for Wear OS, Fused Location Provider, Wearable Data Layer, TMAP Open API(보행자 경로·장소 검색)
 
@@ -210,6 +210,33 @@ Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올�
 
 - 첫 커밋 때 이름·이메일을 물으면 GitHub 계정과 같은 것으로 넣습니다
 - 커밋 메시지는 무엇을 했는지 한 줄로: 예) `T5 진행 화면 상태별 색과 남은 시간 표시`
+
+---
+
+## 8. AI 도구(Claude, ChatGPT, Copilot 등)와 같이 작업할 때
+
+AI에게 질문하기 전에 **아래 문서를 먼저 넣어 주면** 프로젝트 맥락을 훨씬 잘 이해하고 엉뚱한 답이 줄어듭니다.
+
+| 넣을 문서 | 알려 주는 것 |
+|---|---|
+| [`docs/project.md`](docs/project.md) | **왜 이렇게 만드는지** — 기획 의도, 판단 로직(속도·남은 거리·경로 이탈)의 근거, 플랫폼 선택 이유 |
+| [`README.md`](README.md) | 설치·실행 방법, 프로젝트 구조, 작업 규칙 |
+| [`TODOLIST.md`](TODOLIST.md) | 내가 맡은 할 일의 순서·열 파일·완료 기준 |
+| 지금 고치는 파일 | 예: `wear/.../screens/ProgressScreen.kt` |
+
+**이렇게 쓰면 됩니다**
+- 채팅형 AI(ChatGPT, Claude 웹): 위 문서를 첨부하거나 내용을 붙여 넣고 질문
+- 코딩 에이전트(Claude Code, Copilot 등): 저장소 폴더에서 열고 "`docs/project.md`, `README.md`, `TODOLIST.md`를 먼저 읽고 T5를 도와줘"처럼 시작
+
+**질문 예시**
+```
+docs/project.md, README.md, TODOLIST.md 를 먼저 읽어 줘.
+나는 TODOLIST의 T5(안내 중 화면)를 맡았어.
+wear/.../screens/ProgressScreen.kt 에서 "뛰어야 맞춤"일 때 글자가 깜빡이게 하고 싶어.
+```
+
+> `docs/project.md`의 1~10절은 처음 기획이라 지금과 다른 부분이 있습니다. 문서 맨 위에 바뀐 점을 적어 두었고, 서로 다르면 **README·TODOLIST가 우선**입니다.
+> ⚠️ AI가 코드를 써 줘도 **커밋·푸시는 반드시 내가 직접** 합니다. TMAP 키 같은 값을 AI 채팅에 붙여 넣지 않습니다.
 
 ---
 
