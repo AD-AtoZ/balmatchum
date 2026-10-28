@@ -13,7 +13,7 @@ import java.net.URLEncoder
 
 /**
  * TMAP Open API 호출. 네트워크를 쓰므로 안드로이드에서는 메인 스레드가 아닌 곳(Dispatchers.IO)에서 부른다.
- * 키는 `local.properties`의 `TMAP_APP_KEY` → BuildConfig로 넘겨받는다. 키를 로그에 찍지 않는다.
+ * 키는 BuildConfig.TMAP_APP_KEY로 넘겨받는다(팀 공용 키는 저장소의 `secrets.defaults.properties`). 키를 로그에 찍지 않는다.
  */
 class TmapApi(private val appKey: String) {
 

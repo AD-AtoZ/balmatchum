@@ -16,7 +16,7 @@
 | 10/28 (수) | 첫 커밋, GitHub 초대 | L1 L2 | 리드 |
 | 10/28 (수) | 스켈레톤 (내 속도 기준 판단, 화면 뼈대, 가짜 데이터) | L3 L4 | 리드 |
 | 10/28 (수) | GitHub 가입, Android Studio 설치, 저장소 받기 | S1 S2 S3 | 팀원 모두 |
-| 10/29 (목) | 가상 워치로 앱 띄워 보기, TMAP 키 넣기 | S4 S5 | 팀원 모두 |
+| 10/29 (목) | 가상 워치로 앱 띄워 보기 | S4 S5 | 팀원 모두 |
 | 10/29 (목) | 고객여정지도 수업 발표 | — | 모두 |
 | 10/29 (목) | 오즈의 마법사 진동 테스트 | T8 | |
 | 10/29 (목) | **팀명·작품명 정하기** | — | 모두 |
@@ -80,7 +80,7 @@
 | S1 | GitHub 계정 만들고 리드에게 아이디 알려 주기 | github.com 가입 → 아이디를 리드에게 → 저장소 `AD-AtoZ/balmatchum` 초대 메일 수락 | 저장소 페이지가 열린다 |
 | S2 | Android Studio 설치 | developer.android.com/studio 에서 받아 설치 → 첫 실행 마법사는 Standard | Welcome 화면이 뜬다 |
 | S3 | 저장소 받기 | Android Studio Welcome → **Clone Repository** → 주소 `https://github.com/AD-AtoZ/balmatchum.git` → 폴더는 **영어만 있는 경로**(예: `C:\dev\balmatchum`) | 프로젝트가 열리고 Gradle sync가 끝난다 |
-| S4 | TMAP 키 넣기 | openapi.sk.com 가입 → 리드가 앱 **멤버로 초대** → 대시보드 앱키 탭에서 복사 (또는 리드에게 1:1 메신저로 받기) → 프로젝트 맨 위 `local.properties` 맨 아래에 `TMAP_APP_KEY=키` 한 줄 추가 → Gradle Sync. 자세한 건 README 2-③. **절대 GitHub·단톡방·문서에 키를 쓰지 않기** | 휴대폰 앱의 "시험 목적지 보내기"가 경로를 받아 온다 |
+| S4 | TMAP 키 확인 | **따로 할 일 없음.** 팀 공용 키가 저장소의 `secrets.defaults.properties`에 들어 있어 Clone만 하면 자동으로 쓰입니다. 파일이 있는지만 확인 (내 키를 쓰고 싶을 때만 README 2-③) | 휴대폰 앱의 "시험 목적지 보내기"가 경로를 받아 온다 |
 | S5 | 가상 워치 만들고 앱 띄우기 | Device Manager → + → Wear OS → Wear OS Large Round → 시스템 이미지 API 36 → 만든 뒤 ▶ → 위쪽 실행 대상에서 `wear` 고르고 ▶ Run | 가상 워치에 "발맞춤" 앱이 뜬다 |
 
 > 원격 데스크톱으로 보면 가상 워치 화면이 회색일 수 있습니다. Device Manager에서 가상 워치 ✏️ → Show Advanced Settings → Graphics를 **Software**로 바꾸면 됩니다.
@@ -90,7 +90,7 @@
 > ⚠️ **커밋(commit)과 푸시(push)는 반드시 본인이 직접 합니다.**
 > - ChatGPT, Claude, Copilot 같은 AI 도구에게 코드 작성을 도움받아도 됩니다. 하지만 **커밋·푸시를 AI에게 시키거나 자동으로 하게 두지 마세요.** AI가 "커밋할까요?"라고 물으면 거절하고 직접 합니다
 > - 커밋하기 전에 **무엇이 바뀌었는지 직접 확인**합니다: Android Studio의 Commit 창에서 파일 목록과 변경 내용(diff)을 한 번 훑어보기
-> - **`local.properties`(TMAP 키)가 커밋 목록에 있으면 절대 올리지 않습니다.** 원래 제외되게 설정돼 있지만, 목록에 보이면 체크를 풀고 리드에게 알려 주세요
+> - **`local.properties`(내 PC 설정)나 `secrets.properties`(개인 키)가 커밋 목록에 있으면 올리지 않습니다.** 원래 제외되게 설정돼 있지만, 목록에 보이면 체크를 풀고 리드에게 알려 주세요
 > - 리드(동언)도 같은 규칙을 따릅니다
 
 - 자기 일은 **브랜치를 따서** 합니다: `git checkout -b 할일번호-짧은이름` (예: `T5-progress-screen`)
@@ -338,7 +338,7 @@ balmatchum/
 #### T17. GitHub README 정리 ★ — 담당: ____
 - 팀원구성 엑셀에 GitHub URL을 적고 심사위원이 코드를 봅니다. **심사위원이 열 수 있게 저장소를 공개로 바꿔야 합니다** (리드와 시점 정하기)
 - README에 소개, 화면 캡처, 실행 방법, 폴더 구조를 정리
-- 공개 전에 확인: `local.properties`(TMAP 키)가 올라가지 않았는지, 시연 경로 파일의 출발지 위치를 공개해도 되는지
+- 공개 전에 확인: 시연 경로 파일의 출발지 위치를 공개해도 되는지. TMAP 팀 키는 `secrets.defaults.properties`로 공개돼도 괜찮다고 리드가 정함
 
 ---
 

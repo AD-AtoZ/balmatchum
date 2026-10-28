@@ -1,9 +1,14 @@
 import java.util.Properties
 
-// TMAP 키는 local.properties의 TMAP_APP_KEY에서 읽어 BuildConfig.TMAP_APP_KEY로 넣는다. GitHub에는 올라가지 않는다.
-val tmapAppKey: String = Properties().apply {
-    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
-}.getProperty("TMAP_APP_KEY", "")
+// TMAP 키를 BuildConfig.TMAP_APP_KEY로 넣는다. 찾는 순서:
+// secrets.properties(개인용, GitHub 제외) → local.properties → secrets.defaults.properties(팀 공용, GitHub 포함)
+// 저장소만 받으면 팀 공용 키로 바로 빌드된다.
+val tmapAppKey: String = listOf("secrets.properties", "local.properties", "secrets.defaults.properties")
+    .map { rootProject.file(it) }
+    .filter { it.exists() }
+    .firstNotNullOfOrNull { file ->
+        Properties().apply { file.inputStream().use { load(it) } }.getProperty("TMAP_APP_KEY")?.trim()?.takeIf { it.isNotEmpty() }
+    } ?: ""
 
 plugins {
     alias(libs.plugins.android.application)

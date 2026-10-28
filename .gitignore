@@ -18,3 +18,6 @@ local.properties
 .kotlin/
 # IDE settings are per-person
 /.idea/
+
+# 개인용 키 덮어쓰기 파일 (팀 공용은 secrets.defaults.properties)
+secrets.properties

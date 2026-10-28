@@ -34,7 +34,7 @@
 2. 이메일, 비밀번호, 사용자 이름(영어)을 넣고 이메일로 온 코드로 인증합니다
 3. **사용자 이름을 리드에게 알려 줍니다.** 리드가 저장소 `AD-AtoZ/balmatchum`에 초대합니다
 4. 이메일로 온 초대 메일에서 **View invitation → Accept invitation**을 누릅니다
-5. https://github.com/AD-AtoZ/balmatchum 이 열리면 성공입니다 (비공개 저장소라 초대를 수락해야 보입니다)
+5. https://github.com/AD-AtoZ/balmatchum 이 열리면 성공입니다. 초대를 수락해야 코드를 **올릴(push)** 수 있습니다
 
 ### 1-2. Git 설치
 **Windows**
@@ -69,7 +69,7 @@ Android Studio를 처음 켜면 설정 마법사가 나옵니다.
 > 💡 C 드라이브 공간이 부족하면 4번에서 **Custom**을 고르고, 다음 화면 맨 아래 **Android SDK Location**을 다른 드라이브(예: `D:\Android\Sdk`)로 바꾸면 됩니다. Standard에서는 위치를 바꿀 수 없습니다.
 
 ### 1-5. Android Studio에 GitHub 계정 연결
-비공개 저장소라서 Android Studio가 내 GitHub 계정으로 로그인해야 코드를 받고 올릴 수 있습니다.
+Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올릴(push) 수 있습니다.
 
 1. Welcome 화면 왼쪽 아래 ⚙ → **Settings** (Mac: 메뉴 **Android Studio → Settings**)
 2. **Version Control → GitHub** → **+** → **Log In via GitHub…**
@@ -94,27 +94,28 @@ Android Studio를 처음 켜면 설정 마법사가 나옵니다.
 - Android Studio를 켜면 Welcome 화면 목록에 **balmatchum**이 있습니다. 누르면 열립니다
 - 목록에 없으면 **Open** → ①에서 정한 폴더(예: `C:\dev\balmatchum`)를 고릅니다
 
-### ③ TMAP 키 넣기 (경로 받기·장소 검색에 필요)
+### ③ TMAP 키 (따로 할 일 없음 ✅)
 
-팀 전체가 **리드가 만든 TMAP 앱 키 하나**를 같이 씁니다. 키는 저장소에 들어 있지 않으니, 아래 둘 중 한 방법으로 받아서 각자 PC에 넣습니다.
+**팀 공용 TMAP 키가 저장소의 `secrets.defaults.properties`에 들어 있습니다.** Clone만 하면 빌드할 때 이 키가 자동으로 앱에 들어가므로 **따로 받거나 넣을 필요가 없습니다.**
 
-**키 받는 방법**
+확인하고 싶으면: 프로젝트 맨 위 폴더에 `secrets.defaults.properties` 파일이 있고, 안에 `TMAP_APP_KEY=...` 줄이 있으면 됩니다.
 
-| 방법 | 하는 일 |
-|---|---|
-| **A. SK open API 앱 멤버로 초대받기 (권장)** | ① [openapi.sk.com](https://openapi.sk.com)에 가입하고 가입한 이메일을 리드에게 알립니다<br>② 리드가 **대시보드 → 앱 → 앱 상세 → 멤버관리 → 멤버 초대하기**로 초대합니다<br>③ 초대를 수락하고 **대시보드 → 앱 → 앱 상세 → 앱키 탭**에서 키를 복사합니다 |
-| B. 리드에게 직접 받기 | 리드에게 **1:1 메신저**로 키를 받습니다 |
+<details>
+<summary>내 키를 따로 쓰고 싶을 때만 (보통은 안 해도 됨)</summary>
 
-**키 넣기**
-1. 프로젝트 맨 위 폴더의 `local.properties` 파일을 엽니다 (Android Studio 왼쪽 Project 창에서 보기를 **Project**로 바꾸면 보입니다)
-2. 맨 아래에 한 줄을 추가하고 저장합니다. 앞뒤에 공백·따옴표 없이
+1. 프로젝트 맨 위 폴더에서 팀 파일을 복사해 개인 파일을 만듭니다 (Android Studio 아래 **Terminal**에서)
    ```
-   TMAP_APP_KEY=복사한키
+   copy secrets.defaults.properties secrets.properties      (Windows)
+   cp secrets.defaults.properties secrets.properties        (Mac)
    ```
-3. **File → Sync Project with Gradle Files**를 누른 뒤 다시 Run 하면 앱에 키가 들어갑니다
+2. `secrets.properties`를 열어 `TMAP_APP_KEY=` 뒤를 내 키로 바꿉니다 (키는 [openapi.sk.com](https://openapi.sk.com) → 대시보드 → 앱 → 앱키 탭)
+3. **File → Sync Project with Gradle Files** → 다시 Run
 
-> ⚠️ **키를 GitHub·단톡방·문서·스크린샷에 남기지 않습니다.** 저장소는 심사 때 공개되고, 키가 퍼지면 다른 사람이 팀 무료 한도(경로 하루 1,000건)를 써 버릴 수 있습니다. `local.properties`는 GitHub에 안 올라가게 이미 설정돼 있습니다.
-> 가상 워치의 시연 경로 2개는 앱 안에 미리 들어 있어서 **키가 없어도 실행·가상 걷기는 됩니다.** 키는 새 목적지를 검색하거나 경로를 받을 때(휴대폰 앱) 필요합니다.
+키를 읽는 순서는 `secrets.properties`(개인, GitHub에 안 올라감) → `local.properties` → `secrets.defaults.properties`(팀 공용)입니다.
+</details>
+
+> 팀 공용 키는 무료 요금제라 **경로 안내 하루 1,000건**까지 쓸 수 있고, 넘으면 그날만 막히고 요금은 나가지 않습니다.
+> 가상 워치의 시연 경로 2개는 앱 안에 미리 들어 있어서 키가 없어도 실행·가상 걷기는 됩니다. 키는 새 목적지를 검색하거나 경로를 받을 때(휴대폰 앱) 쓰입니다.
 
 ### ④ 가상 워치 만들기
 1. 오른쪽 사이드바 **Device Manager** → **+** → **Create Virtual Device**
@@ -192,7 +193,7 @@ Android Studio를 처음 켜면 설정 마법사가 나옵니다.
 
 1. 할 일은 [`TODOLIST.md`](TODOLIST.md)에서 골라 **"담당" 칸에 이름**을 먼저 적습니다
 2. 브랜치를 따서 작업합니다: `T5-progress-screen`처럼 `할일번호-짧은이름`
-3. 커밋 전에 Commit 창에서 **바뀐 파일과 내용을 직접 확인**합니다. `local.properties`가 보이면 절대 올리지 않습니다
+3. 커밋 전에 Commit 창에서 **바뀐 파일과 내용을 직접 확인**합니다. `local.properties`(내 PC 설정)와 `secrets.properties`(개인 키)는 올리지 않습니다
 4. 끝나면 GitHub에서 **Pull Request**를 열고 리드에게 리뷰를 부탁합니다. `main`에 바로 올리지 않습니다
 5. 막히면 30분 이상 혼자 붙잡지 말고 리드에게 물어보세요
 
@@ -217,7 +218,7 @@ Android Studio를 처음 켜면 설정 마법사가 나옵니다.
 | 증상 | 해결 |
 |---|---|
 | Gradle sync가 실패한다 | 저장 경로에 한글·공백이 있는지 확인. **File → Sync Project with Gradle Files** 다시 실행 |
-| `TMAP_APP_KEY`가 없다고 나온다 | `local.properties`에 키 줄이 있는지, 앞뒤에 공백·따옴표가 없는지 확인 |
+| `TMAP_APP_KEY`가 없다고 나온다 | 프로젝트 맨 위에 `secrets.defaults.properties`가 있는지 확인 (없으면 **Git → Pull**). 그다음 **File → Sync Project with Gradle Files** |
 | 가상 워치가 켜지지 않는다 | 2-④의 "Windows 하이퍼바이저 플랫폼" 확인 |
 | 가상 워치 화면이 회색이다 | 2-④의 Graphics를 Software로 |
 | 실행 대상에 wear가 없다 | Gradle sync가 끝났는지 확인 |
