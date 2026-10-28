@@ -32,7 +32,7 @@
 ### 1-1. GitHub 계정 만들기
 1. https://github.com 에 들어가 오른쪽 위 **Sign up**을 누릅니다
 2. 이메일, 비밀번호, 사용자 이름(영어)을 넣고 이메일로 온 코드로 인증합니다
-3. **사용자 이름을 리드에게 알려 줍니다.** 리드가 저장소 `AD-AtoZ/balmatchum`에 초대합니다
+3. **사용자 이름을 멘토에게 알려 줍니다.** 저장소 `AD-AtoZ/balmatchum`에 초대해 줍니다
 4. 이메일로 온 초대 메일에서 **View invitation → Accept invitation**을 누릅니다
 5. https://github.com/AD-AtoZ/balmatchum 이 열리면 성공입니다. 초대를 수락해야 코드를 **올릴(push)** 수 있습니다
 
@@ -142,7 +142,7 @@ Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올�
 2. 경로를 고르고, 목표 시각을 **-1분**으로 몇 번 줄여 빠듯하게 만든 뒤 **출발**
 3. 상태가 바뀌면 화면 색이 바뀌고, 도착하면 결과 화면이 나옵니다
 
-안내할 때마다 기록이 CSV로 남습니다. 꺼내는 방법은 [`TODOLIST.md`](TODOLIST.md) 3절에 있습니다.
+안내할 때마다 기록이 CSV로 남습니다. 꺼내는 방법은 [`TODOLIST.md`](TODOLIST.md) 맨 아래 부록에 있습니다.
 
 ---
 
@@ -181,7 +181,7 @@ Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올�
 | `wear/` | 워치 앱. 화면(`presentation/screens/`), 안내 서비스, 위치, 진동, CSV 기록 |
 | `mobile/` | 휴대폰 앱. 목적지를 검색해 워치로 보내기 (만드는 중) |
 
-파일 단위 설명은 [`TODOLIST.md`](TODOLIST.md) 3절을 보세요.
+파일 위치는 [`TODOLIST.md`](TODOLIST.md) 맨 아래 부록에 표로 있습니다.
 
 **사용 기술**: Kotlin, Jetpack Compose for Wear OS, Fused Location Provider, Wearable Data Layer, TMAP Open API(보행자 경로·장소 검색)
 
@@ -194,8 +194,8 @@ Android Studio가 내 GitHub 계정으로 로그인돼 있어야 코드를 올�
 1. 할 일은 [`TODOLIST.md`](TODOLIST.md)에서 골라 **"담당" 칸에 이름**을 먼저 적습니다
 2. 브랜치를 따서 작업합니다: `T5-progress-screen`처럼 `할일번호-짧은이름`
 3. 커밋 전에 Commit 창에서 **바뀐 파일과 내용을 직접 확인**합니다. `local.properties`(내 PC 설정)와 `secrets.properties`(개인 키)는 올리지 않습니다
-4. 끝나면 GitHub에서 **Pull Request**를 열고 리드에게 리뷰를 부탁합니다. `main`에 바로 올리지 않습니다
-5. 막히면 30분 이상 혼자 붙잡지 말고 리드에게 물어보세요
+4. 끝나면 GitHub에서 **Pull Request**를 열고 멘토에게 리뷰를 부탁합니다. `main`에 바로 올리지 않습니다
+5. 막히면 30분 이상 혼자 붙잡지 말고 멘토에게 물어보세요
 
 ### Android Studio에서 브랜치·커밋·푸시하기
 다른 프로그램 없이 Android Studio 안에서 다 됩니다.
