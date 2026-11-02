@@ -1,6 +1,12 @@
 package kr.ac.cnu.balmatchum
 
+import android.Manifest
 import android.app.TimePickerDialog
+import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,15 +48,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kr.ac.cnu.balmatchum.core.Destination
 import kr.ac.cnu.balmatchum.core.GeoPoint
 import kr.ac.cnu.balmatchum.core.TmapApi
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-
-/** T10에서 현재 위치를 연결하기 전까지 사용하는 시험 출발지. */
-private val DEMO_START = GeoPoint(36.36621027, 127.34446567)
 
 private val PoiListSaver = listSaver<List<TmapApi.Poi>, String>(
     save = { pois -> pois.flatMap { listOf(it.name, it.address, it.entrance.lat.toString(), it.entrance.lon.toString()) } },
@@ -62,6 +64,7 @@ fun PlaceSearchScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     val link = remember { WatchLink(context.applicationContext) }
+    val location = remember { PhoneLocation(context.applicationContext) }
     val tmap = remember { TmapApi(BuildConfig.TMAP_APP_KEY) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -72,12 +75,14 @@ fun PlaceSearchScreen(modifier: Modifier = Modifier) {
     var searched by rememberSaveable { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
+    var requestingPermission by rememberSaveable { mutableStateOf(false) }
+    var permissionDenied by rememberSaveable { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("") }
     var deadline by rememberSaveable { mutableLongStateOf(0L) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val zone = ZoneId.systemDefault()
-    val busy = searching || sending
+    val busy = searching || sending || requestingPermission
     LaunchedEffect(selectedIndex) {
         if (selectedIndex >= 0) listState.animateScrollToItem(3 + results.size)
     }
@@ -108,6 +113,67 @@ fun PlaceSearchScreen(modifier: Modifier = Modifier) {
             } finally {
                 searching = false
             }
+        }
+    }
+
+    fun sendSelected() {
+        val poi = selected ?: return
+        if (sending || searching) return
+        val target = deadline
+        if (target <= System.currentTimeMillis()) {
+            status = "도착 시각이 지났어요. 다시 골라 주세요."
+            return
+        }
+        sending = true
+        status = "현재 위치 찾는 중…"
+        scope.launch {
+            try {
+                val destination = preparePhoneDestination(
+                    poi, target,
+                    currentPoint = { location.currentPoint() },
+                    routeJson = { start, end ->
+                        status = "현재 위치에서 경로 받는 중…"
+                        withContext(Dispatchers.IO) {
+                            tmap.pedestrianRouteJson(start, end.entrance, "현재 위치", end.name)
+                        }
+                    },
+                )
+                status = "워치로 보내는 중…"
+                link.sendDestination(destination) { count ->
+                    status = if (count > 0) "워치 ${count}대로 보냈어요. 워치에서 목적지를 선택해 주세요."
+                    else "보내지 못했어요. 워치 연결을 확인하고 다시 보내 주세요."
+                    sending = false
+                }
+            } catch (e: CancellationException) {
+                sending = false
+                throw e
+            } catch (e: PhoneLocationException) {
+                status = e.message.orEmpty()
+                sending = false
+            } catch (_: ArrivalTimeExpiredException) {
+                status = "도착 시각이 지났어요. 다시 골라 주세요."
+                sending = false
+            } catch (_: SecurityException) {
+                status = "위치 권한이 필요해요. 앱 설정에서 정확한 위치를 허용하고 다시 보내 주세요."
+                permissionDenied = true
+                sending = false
+            } catch (_: Exception) {
+                status = "위치 또는 경로를 받지 못했어요. 위치 설정과 인터넷 연결을 확인하고 다시 보내 주세요."
+                sending = false
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        requestingPermission = false
+        if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            permissionDenied = false
+            sendSelected()
+        } else {
+            permissionDenied = true
+            status = "현재 위치에서 출발하려면 정확한 위치 권한이 필요해요. 앱 설정에서 허용한 뒤 다시 보내 주세요."
         }
     }
 
@@ -194,39 +260,27 @@ fun PlaceSearchScreen(modifier: Modifier = Modifier) {
                         }, arrival.hour, arrival.minute, true).show()
                     }) { Text(arrival.format(DateTimeFormatter.ofPattern("M월 d일 HH:mm"))) }
                     if (deadline <= now) Text("현재보다 나중인 도착 시각을 골라 주세요.", color = MaterialTheme.colorScheme.error)
-                    Text("시험 경로: 출발지는 공대 5호관 입구로 고정됩니다. 현재 위치 연결은 T10에서 추가합니다.")
+                    Text("휴대폰의 현재 위치에서 목적지 입구까지 보행 경로를 받아 워치로 보냅니다. 정확한 위치 권한이 필요해요.")
                     Button(enabled = !busy && deadline > now, onClick = {
-                        if (deadline <= System.currentTimeMillis()) {
-                            status = "도착 시각이 지났어요. 다시 골라 주세요."
-                            return@Button
+                        if (location.hasPrecisePermission()) {
+                            sendSelected()
+                        } else {
+                            requestingPermission = true
+                            permissionLauncher.launch(arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                            ))
                         }
-                        sending = true
-                        status = "시험 경로 받는 중…"
-                        val target = deadline
-                        scope.launch {
-                            try {
-                                val json = withContext(Dispatchers.IO) {
-                                    tmap.pedestrianRouteJson(DEMO_START, poi.entrance, "공대 5호관 입구", poi.name)
-                                }
-                                if (target <= System.currentTimeMillis()) {
-                                    status = "도착 시각이 지났어요. 다시 골라 주세요."
-                                    sending = false
-                                } else {
-                                    status = "워치로 보내는 중…"
-                                    link.sendDestination(Destination(poi.name, json, arrivalTimeMillis = target)) { count ->
-                                        status = if (count > 0) "워치 ${count}대로 보냈어요. 워치에서 목적지를 선택해 주세요."
-                                        else "보내지 못했어요. 워치 연결을 확인하고 다시 보내 주세요."
-                                        sending = false
-                                    }
-                                }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (_: Exception) {
-                                status = "경로를 받지 못했어요. 인터넷 연결을 확인하고 다시 보내 주세요."
-                                sending = false
-                            }
-                        }
-                    }) { Text("시험 경로 워치로 보내기") }
+                    }) { Text("워치로 보내기") }
+                    if (permissionDenied) {
+                        TextButton(enabled = !busy, onClick = {
+                            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                "package:${context.packageName}".toUri()))
+                        }) { Text("앱 위치 권한 설정") }
+                    }
+                    TextButton(enabled = !busy, onClick = {
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    }) { Text("휴대폰 위치 설정") }
                 }
             }
         }
