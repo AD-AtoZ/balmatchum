@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -16,6 +17,8 @@ data class Destination(
     /** TMAP `POST /tmap/routes/pedestrian` 응답 JSON 원문. */
     val tmapJson: String,
     val source: Source = Source.DEMO,
+    /** 휴대폰에서 선택한 목표 시각. 이전 메시지에는 없을 수 있다. */
+    val arrivalTimeMillis: Long? = null,
 ) {
     enum class Source { DEMO, PHONE }
 
@@ -26,6 +29,7 @@ data class Destination(
     fun toJson(): String = buildJsonObject {
         put("name", name)
         put("tmap", tmapJson)
+        arrivalTimeMillis?.let { put("arrivalTimeMillis", it) }
     }.toString()
 
     companion object {
@@ -35,6 +39,7 @@ data class Destination(
                 name = o.getValue("name").jsonPrimitive.content,
                 tmapJson = o.getValue("tmap").jsonPrimitive.content,
                 source = source,
+                arrivalTimeMillis = o["arrivalTimeMillis"]?.jsonPrimitive?.longOrNull,
             )
         }
     }

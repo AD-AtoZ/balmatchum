@@ -1,10 +1,26 @@
 package kr.ac.cnu.balmatchum.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 
 class DestinationTest {
+
+    @Test
+    fun arrivalTimeSurvivesPhoneToWatchAndStorage() {
+        val sent = Destination("공대 5호관", "{}", arrivalTimeMillis = 1_800_000_000_000L)
+        val received = Destination.fromJson(sent.toJson())
+        val reloaded = Destination.fromJson(received.toJson())
+        assertEquals(sent.arrivalTimeMillis, received.arrivalTimeMillis)
+        assertEquals(sent.arrivalTimeMillis, reloaded.arrivalTimeMillis)
+    }
+
+    @Test
+    fun oldMessageWithoutArrivalTimeStillLoads() {
+        val received = Destination.fromJson("""{"name":"공대 5호관","tmap":"{}"}""")
+        assertNull(received.arrivalTimeMillis)
+    }
 
     @Test
     fun survivesPhoneToWatchJson() {
