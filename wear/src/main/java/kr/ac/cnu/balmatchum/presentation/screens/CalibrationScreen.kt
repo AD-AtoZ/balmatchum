@@ -23,6 +23,7 @@ import kr.ac.cnu.balmatchum.presentation.components.ListScreen
 import kr.ac.cnu.balmatchum.presentation.components.buttonItem
 import kr.ac.cnu.balmatchum.presentation.components.textItem
 import kr.ac.cnu.balmatchum.presentation.theme.BalmatchumTheme
+import kotlin.time.Duration.Companion.milliseconds
 
 /** 재는 속도의 종류. */
 private enum class SpeedKind(val label: String) {
@@ -72,7 +73,7 @@ fun CalibrationScreen(
             for (left in MEASURE_SECONDS downTo 1) {
                 secondsLeft = left
                 if (simulate) samples.add(System.currentTimeMillis() to simulatedSpeed(kind))
-                delay(1_000)
+                delay(1_000.milliseconds)
             }
             val result = temporaryRepresentativeSpeed(samples)
             if (result == null) {
