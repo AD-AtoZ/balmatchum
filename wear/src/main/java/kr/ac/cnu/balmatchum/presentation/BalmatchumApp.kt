@@ -91,7 +91,8 @@ fun BalmatchumApp(
                     onPick = { i ->
                         val d = destinations[i]
                         selected = d
-                        deadline = defaultDeadline(d)
+                        deadline = d.arrivalTimeMillis?.takeIf { it > System.currentTimeMillis() }
+                            ?: defaultDeadline(d)
                         screen = Screen.TARGET_TIME
                     },
                 )
