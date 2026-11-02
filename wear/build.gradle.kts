@@ -51,6 +51,7 @@ android {
 }
 
 dependencies {
+    testImplementation(libs.junit)
     implementation(project(":core"))
     implementation(libs.play.services.location)
     implementation(libs.androidx.datastore.preferences)
