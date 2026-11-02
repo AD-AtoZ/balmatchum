@@ -8,5 +8,5 @@ fun ArrivalState.color(): Color = when (this) {
     ArrivalState.RELAXED -> Color(0xFF2E7D32)
     ArrivalState.HURRY -> Color(0xFFF9A825)
     ArrivalState.RUN -> Color(0xFFC62828)
-    ArrivalState.TOO_LATE -> Color(0xFF616161)
+    ArrivalState.TOO_LATE -> Color.Black
 }
