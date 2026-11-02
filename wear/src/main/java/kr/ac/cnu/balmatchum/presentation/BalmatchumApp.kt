@@ -98,8 +98,10 @@ fun BalmatchumApp(
 
                 Screen.CALIBRATION -> CalibrationScreen(
                     saved = savedSpeeds,
+                    onSave = { scope.launch { speedStore.save(it) } },
                     onResetToDefault = { scope.launch { speedStore.clear() } },
                     onDone = { screen = Screen.DESTINATIONS },
+                    simulate = SIMULATION_OPTIONS[simulationIndex].second != null,   // ← 추가
                 )
 
                 Screen.TARGET_TIME -> TargetTimeScreen(
@@ -138,3 +140,4 @@ private fun defaultDeadline(d: Destination): Long {
     val raw = System.currentTimeMillis() + (d.tmap.totalTimeSec * 1000).toLong() + 120_000
     return (raw + 59_999) / 60_000 * 60_000
 }
+
