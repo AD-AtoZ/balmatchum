@@ -3,6 +3,7 @@ package kr.ac.cnu.balmatchum.log
 import android.content.Context
 import kr.ac.cnu.balmatchum.core.CoachUpdate
 import kr.ac.cnu.balmatchum.core.LocationSample
+import kr.ac.cnu.balmatchum.core.UpcomingTurn
 import java.io.File
 import java.io.PrintWriter
 import java.text.SimpleDateFormat
@@ -26,11 +27,11 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
     init {
         out.println(
             "time,elapsed_s,lat,lon,accuracy_m,gps_speed_mps,moving_speed_mps,remaining_m,remaining_s," +
-                "required_speed_mps,observed_state,state,state_changed,off_route",
+                "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m",
         )
     }
 
-    fun log(sample: LocationSample, u: CoachUpdate) {
+    fun log(sample: LocationSample, u: CoachUpdate, next: UpcomingTurn?) {
         out.println(
             listOf(
                 clock.format(Date(sample.timeMillis)),
@@ -47,6 +48,8 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
                 u.state.name,
                 u.stateChanged,
                 u.offRoute,
+                next?.let { it.turn?.label ?: "도착" }.orEmpty(),
+                next?.let { "%.1f".format(Locale.US, it.distanceM) }.orEmpty(),
             ).joinToString(","),
         )
     }

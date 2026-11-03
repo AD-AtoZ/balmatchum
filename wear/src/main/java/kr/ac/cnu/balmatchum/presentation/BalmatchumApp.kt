@@ -120,7 +120,8 @@ fun BalmatchumApp(
                     ProgressScreen(
                         destinationName = running?.request?.destination?.name.orEmpty(),
                         update = running?.latest,
-                        speeds = running?.request?.speeds ?: speeds,
+                        routeDistanceM = running?.request?.destination?.tmap?.route?.totalDistance ?: 0.0,
+                        nextTurn = running?.nextTurn,
                         onStop = stopGuidance,
                     )
                 }

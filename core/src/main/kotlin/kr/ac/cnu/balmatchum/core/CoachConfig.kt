@@ -27,4 +27,8 @@ data class CoachConfig(
     val offRouteConfirmMillis: Long = 10_000,
     /** 이탈 후보 동안 경로상 진행이 이 거리(m) 이하이면 "진행이 없다"고 본다. */
     val offRouteProgressToleranceM: Double = 5.0,
+    /** 다음 안내 지점(좌회전 등)까지 이 거리(m) 이하이면 화면에 큰 화살표로 띄운다. */
+    val turnNearM: Double = 30.0,
+    /** 안내 지점을 이 거리(m) 지나야 다음 안내 지점으로 넘어간다. GPS가 늦게 따라오는 것을 감안한 값. */
+    val turnPassedM: Double = 10.0,
 )

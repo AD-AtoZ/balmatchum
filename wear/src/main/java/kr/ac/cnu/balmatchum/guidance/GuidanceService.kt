@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kr.ac.cnu.balmatchum.core.ArrivalCoach
 import kr.ac.cnu.balmatchum.core.LocationSample
+import kr.ac.cnu.balmatchum.core.TurnGuide
 import kr.ac.cnu.balmatchum.haptics.Haptics
 import kr.ac.cnu.balmatchum.location.FusedLocationSource
 import kr.ac.cnu.balmatchum.location.LocationSource
@@ -36,6 +37,7 @@ class GuidanceService : Service() {
     private var source: LocationSource? = null
     private var logger: CsvLogger? = null
     private var coach: ArrivalCoach? = null
+    private var turnGuide: TurnGuide? = null
     private var firstRemaining: Double? = null
     private var lastRemaining: Double? = null
 
@@ -57,6 +59,7 @@ class GuidanceService : Service() {
         val startedAt = System.currentTimeMillis()
         val route = request.destination.tmap.route
         coach = ArrivalCoach(route, request.deadlineMillis, request.speeds)
+        turnGuide = TurnGuide(request.destination.tmap.turns, route.totalDistance)
         logger = CsvLogger(this, request.destination.name, startedAt)
         val haptics = Haptics(this)
         GuidanceSession.set(GuidanceState.Running(request, startedAt, latest = null))
@@ -67,10 +70,12 @@ class GuidanceService : Service() {
 
     private fun onSample(sample: LocationSample, request: GuidanceRequest, startedAt: Long, haptics: Haptics) {
         val update = coach?.update(sample) ?: return
-        logger?.log(sample, update)
+        // 경로를 따라 온 거리 = 경로 전체 길이 - 남은 거리.
+        val nextTurn = coach?.route?.let { turnGuide?.next(it.totalDistance - update.remainingM) }
+        logger?.log(sample, update, nextTurn)
         if (firstRemaining == null) firstRemaining = update.remainingM
         lastRemaining = update.remainingM
-        GuidanceSession.set(GuidanceState.Running(request, startedAt, update))
+        GuidanceSession.set(GuidanceState.Running(request, startedAt, update, nextTurn))
         if (update.arrived) {
             haptics.playArrived()
             finish(arrived = true)
