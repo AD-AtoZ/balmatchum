@@ -3,6 +3,7 @@ package kr.ac.cnu.balmatchum.guidance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kr.ac.cnu.balmatchum.core.CoachUpdate
+import kr.ac.cnu.balmatchum.core.UpcomingTurn
 import kr.ac.cnu.balmatchum.core.Destination
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
 
@@ -40,6 +41,8 @@ sealed interface GuidanceState {
         val startedAtMillis: Long,
         /** 가장 최근 판단 결과. 첫 위치를 받기 전에는 null. */
         val latest: CoachUpdate?,
+        /** 다음 안내 지점(좌회전 등). 첫 위치를 받기 전에는 null. */
+        val nextTurn: UpcomingTurn? = null,
     ) : GuidanceState
     data class Finished(val result: GuidanceResult) : GuidanceState
 }
