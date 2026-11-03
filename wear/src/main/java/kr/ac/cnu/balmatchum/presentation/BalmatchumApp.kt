@@ -99,8 +99,10 @@ fun BalmatchumApp(
 
                 Screen.CALIBRATION -> CalibrationScreen(
                     saved = savedSpeeds,
+                    onSave = { scope.launch { speedStore.save(it) } },
                     onResetToDefault = { scope.launch { speedStore.clear() } },
                     onDone = { screen = Screen.DESTINATIONS },
+                    simulate = SIMULATION_OPTIONS[simulationIndex].second != null,
                 )
 
                 Screen.TARGET_TIME -> TargetTimeScreen(
