@@ -7,6 +7,15 @@ import kr.ac.cnu.balmatchum.core.UpcomingTurn
 import kr.ac.cnu.balmatchum.core.Destination
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
 
+/** 진동 방식. */
+enum class HapticMode(val label: String) {
+    /** 상태가 바뀔 때 한 번만 (지금까지의 방식). */
+    BASIC("기본"),
+
+    /** 상태가 바뀌면 화면을 탭해 확인할 때까지 같은 진동을 반복. */
+    CONFIRM("확인 진동"),
+}
+
 /** 안내를 시작할 때 화면이 서비스에 넘기는 값. */
 data class GuidanceRequest(
     val destination: Destination,
@@ -15,6 +24,7 @@ data class GuidanceRequest(
     val speeds: PersonalSpeeds,
     /** null이면 실제 위치(GPS·Wi-Fi). 값이 있으면 그 속도(m/s)로 경로를 따라 가상으로 걷는다. */
     val simulatedSpeedMps: Double? = null,
+    val hapticMode: HapticMode = HapticMode.BASIC,
 )
 
 /** 안내가 끝났을 때 결과 화면에 보여 줄 값. */
@@ -43,6 +53,8 @@ sealed interface GuidanceState {
         val latest: CoachUpdate?,
         /** 다음 안내 지점(좌회전 등). 첫 위치를 받기 전에는 null. */
         val nextTurn: UpcomingTurn? = null,
+        /** 확인 진동 모드에서 사용자의 탭을 기다리는 중인가. */
+        val awaitingAck: Boolean = false,
     ) : GuidanceState
     data class Finished(val result: GuidanceResult) : GuidanceState
 }

@@ -36,7 +36,35 @@ class Haptics(context: Context) {
         vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 100, 100), -1))
     }
 
+    /**
+     * 확인 진동 모드용. [play]와 같은 길이·간격 패턴을 최대 세기로 울린다(옷 위에서도 느끼게).
+     * 기본 모드의 [play]는 바꾸지 않으려고 따로 둔다.
+     */
+    fun playStrong(state: ArrivalState) {
+        val timings: LongArray = when (state) {
+            ArrivalState.RELAXED -> {
+                vibrator.cancel()
+                return
+            }
+            ArrivalState.HURRY -> longArrayOf(0, SHORT_DURATION_MS)
+            ArrivalState.RUN -> longArrayOf(0, SHORT_DURATION_MS, PAUSE_MS, SHORT_DURATION_MS, PAUSE_MS, SHORT_DURATION_MS)
+            ArrivalState.TOO_LATE -> longArrayOf(0, LONG_DURATION_MS)
+        }
+        val effect = if (vibrator.hasAmplitudeControl()) {
+            // 짝수 칸(대기)은 0, 홀수 칸(진동)은 최대.
+            val amplitudes = IntArray(timings.size) { i -> if (i % 2 == 0) 0 else MAX_AMPLITUDE }
+            VibrationEffect.createWaveform(timings, amplitudes, -1)
+        } else {
+            VibrationEffect.createWaveform(timings, -1)
+        }
+        vibrator.vibrate(effect)
+    }
+
+    /** 진행 중인 진동을 멈춘다. */
+    fun cancel() = vibrator.cancel()
+
     private companion object {
+        const val MAX_AMPLITUDE = 255
         const val SHORT_DURATION_MS = 200L
         const val LONG_DURATION_MS = 600L
         const val PAUSE_MS = 100L

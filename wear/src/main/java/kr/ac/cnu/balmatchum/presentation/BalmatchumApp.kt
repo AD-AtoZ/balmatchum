@@ -15,9 +15,11 @@ import kotlinx.coroutines.launch
 import kr.ac.cnu.balmatchum.BuildConfig
 import kr.ac.cnu.balmatchum.core.Destination
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
+import kr.ac.cnu.balmatchum.data.HapticModeStore
 import kr.ac.cnu.balmatchum.data.PhoneDestinationStore
 import kr.ac.cnu.balmatchum.data.SpeedStore
 import kr.ac.cnu.balmatchum.guidance.GuidanceRequest
+import kr.ac.cnu.balmatchum.guidance.HapticMode
 import kr.ac.cnu.balmatchum.guidance.GuidanceSession
 import kr.ac.cnu.balmatchum.guidance.GuidanceState
 import kr.ac.cnu.balmatchum.presentation.screens.CalibrationScreen
@@ -48,13 +50,16 @@ private val SIMULATION_OPTIONS = listOf<Pair<String, Double?>>(
 fun BalmatchumApp(
     demoDestinations: List<Destination>,
     speedStore: SpeedStore,
+    hapticModeStore: HapticModeStore,
     startGuidance: (GuidanceRequest) -> Unit,
     stopGuidance: () -> Unit,
+    acknowledge: () -> Unit,
 ) {
     val guidance by GuidanceSession.state.collectAsState()
     val phoneDestination by PhoneDestinationStore.latest.collectAsState()
     val savedSpeeds by speedStore.speeds.collectAsState(initial = null)
     val speeds = savedSpeeds ?: PersonalSpeeds.DEFAULT
+    val hapticMode by hapticModeStore.mode.collectAsState(initial = HapticMode.BASIC)
     val scope = rememberCoroutineScope()
 
     var screen by remember { mutableStateOf(if (guidance is GuidanceState.Running) Screen.PROGRESS else Screen.DESTINATIONS) }
@@ -108,10 +113,18 @@ fun BalmatchumApp(
                 Screen.TARGET_TIME -> TargetTimeScreen(
                     destinationName = selected?.name.orEmpty(),
                     deadlineMillis = deadline,
+                    hapticMode = hapticMode,
+                    onToggleHapticMode = {
+                        scope.launch {
+                            hapticModeStore.save(if (hapticMode == HapticMode.BASIC) HapticMode.CONFIRM else HapticMode.BASIC)
+                        }
+                    },
                     onChange = { deadline = it },
                     onStart = {
                         val d = selected ?: return@TargetTimeScreen
-                        startGuidance(GuidanceRequest(d, deadline, speeds, SIMULATION_OPTIONS[simulationIndex].second))
+                        startGuidance(
+                            GuidanceRequest(d, deadline, speeds, SIMULATION_OPTIONS[simulationIndex].second, hapticMode),
+                        )
                     },
                 )
 
@@ -122,6 +135,8 @@ fun BalmatchumApp(
                         update = running?.latest,
                         routeDistanceM = running?.request?.destination?.tmap?.route?.totalDistance ?: 0.0,
                         nextTurn = running?.nextTurn,
+                        awaitingAck = running?.awaitingAck == true,
+                        onAcknowledge = if (running?.request?.hapticMode == HapticMode.CONFIRM) acknowledge else null,
                         onStop = stopGuidance,
                     )
                 }

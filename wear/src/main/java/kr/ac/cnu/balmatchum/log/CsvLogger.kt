@@ -27,7 +27,7 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
     init {
         out.println(
             "time,elapsed_s,lat,lon,accuracy_m,gps_speed_mps,moving_speed_mps,remaining_m,remaining_s," +
-                "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m",
+                "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m,event,event_detail",
         )
     }
 
@@ -50,8 +50,23 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
                 u.offRoute,
                 next?.let { it.turn?.label ?: "도착" }.orEmpty(),
                 next?.let { "%.1f".format(Locale.US, it.distanceM) }.orEmpty(),
+                "",
+                "",
             ).joinToString(","),
         )
+    }
+
+    /**
+     * 진동·확인 이벤트 한 줄(위치 열은 비움). event: VIBRATE(울림) / ACK(탭 확인) / NO_ACK(끝까지 확인 없음).
+     * 한 상태 변경당 "몇 번째 진동에서 알았는지"는 이 줄들로 센다.
+     */
+    fun logEvent(timeMillis: Long, event: String, detail: String) {
+        val cols = MutableList(HEADER_COLUMNS) { "" }
+        cols[0] = clock.format(Date(timeMillis))
+        cols[1] = "%.1f".format(Locale.US, (timeMillis - startedAtMillis) / 1000.0)
+        cols[HEADER_COLUMNS - 2] = event
+        cols[HEADER_COLUMNS - 1] = detail
+        out.println(cols.joinToString(","))
     }
 
     fun close() {
@@ -60,6 +75,7 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
     }
 
     private companion object {
+        const val HEADER_COLUMNS = 18
         fun safe(name: String) = name.replace(Regex("[^0-9A-Za-z가-힣]+"), "_").trim('_').take(40)
     }
 }
