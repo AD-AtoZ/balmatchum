@@ -13,9 +13,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kr.ac.cnu.balmatchum.core.ArrivalCoach
+import kr.ac.cnu.balmatchum.core.ArrivalState
+import kr.ac.cnu.balmatchum.core.CoachConfig
+import kr.ac.cnu.balmatchum.core.ConfirmRepeatPolicy
 import kr.ac.cnu.balmatchum.core.LocationSample
 import kr.ac.cnu.balmatchum.core.TurnGuide
 import kr.ac.cnu.balmatchum.haptics.Haptics
@@ -24,6 +30,7 @@ import kr.ac.cnu.balmatchum.location.LocationSource
 import kr.ac.cnu.balmatchum.location.ReplayLocationSource
 import kr.ac.cnu.balmatchum.log.CsvLogger
 import kr.ac.cnu.balmatchum.presentation.MainActivity
+import java.util.Locale
 
 /**
  * 안내 중에 화면이 꺼져도 계속 위치를 받고 판단·진동·기록을 하는 포그라운드 서비스.
@@ -41,11 +48,18 @@ class GuidanceService : Service() {
     private var firstRemaining: Double? = null
     private var lastRemaining: Double? = null
 
+    // 확인 진동 모드 (기본 모드에서는 policy가 null이라 아래 값을 쓰지 않는다).
+    private var haptics: Haptics? = null
+    private var policy: ConfirmRepeatPolicy? = null
+    private var repeatJob: Job? = null
+    private var firstVibrateAt: Long = 0L
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> finish(arrived = false)
+            ACTION_ACK -> acknowledge()
             else -> begin()
         }
         return START_NOT_STICKY
@@ -61,30 +75,98 @@ class GuidanceService : Service() {
         coach = ArrivalCoach(route, request.deadlineMillis, request.speeds)
         turnGuide = TurnGuide(request.destination.tmap.turns, route.totalDistance)
         logger = CsvLogger(this, request.destination.name, startedAt)
-        val haptics = Haptics(this)
+        haptics = Haptics(this)
+        policy = if (request.hapticMode == HapticMode.CONFIRM) {
+            val config = CoachConfig()
+            ConfirmRepeatPolicy(config.confirmRepeatIntervalMs, config.confirmRepeatMax)
+        } else {
+            null
+        }
         GuidanceSession.set(GuidanceState.Running(request, startedAt, latest = null))
 
         source = request.simulatedSpeedMps?.let { ReplayLocationSource(route, it, scope) } ?: FusedLocationSource(this)
-        source?.start { sample -> onSample(sample, request, startedAt, haptics) }
+        source?.start { sample -> onSample(sample, request, startedAt) }
     }
 
-    private fun onSample(sample: LocationSample, request: GuidanceRequest, startedAt: Long, haptics: Haptics) {
+    private fun onSample(sample: LocationSample, request: GuidanceRequest, startedAt: Long) {
         val update = coach?.update(sample) ?: return
         // 경로를 따라 온 거리 = 경로 전체 길이 - 남은 거리.
         val nextTurn = coach?.route?.let { turnGuide?.next(it.totalDistance - update.remainingM) }
         logger?.log(sample, update, nextTurn)
         if (firstRemaining == null) firstRemaining = update.remainingM
         lastRemaining = update.remainingM
-        GuidanceSession.set(GuidanceState.Running(request, startedAt, update, nextTurn))
         if (update.arrived) {
-            haptics.playArrived()
+            stopRepeat()
+            GuidanceSession.set(GuidanceState.Running(request, startedAt, update, nextTurn))
+            haptics?.playArrived()
             finish(arrived = true)
-        } else if (update.stateChanged) {
-            haptics.play(update.state)
+            return
+        }
+        if (update.stateChanged) {
+            val p = policy
+            if (p == null) {
+                haptics?.play(update.state) // 기본 모드: 지금까지와 똑같이 한 번만
+            } else {
+                startConfirmCycle(p, update.state)
+            }
+        }
+        GuidanceSession.set(GuidanceState.Running(request, startedAt, update, nextTurn, awaitingAck = policy?.isPending == true))
+    }
+
+    /** 새 상태 진입: 이전 반복을 끊고, 처음 진동을 울린 뒤 간격마다 반복한다. */
+    private fun startConfirmCycle(p: ConfirmRepeatPolicy, state: ArrivalState) {
+        repeatJob?.cancel()
+        haptics?.cancel()
+        if (!p.onStateChanged(state)) return // 여유: 진동 없음
+        firstVibrateAt = System.currentTimeMillis()
+        vibrateAndLog(state, p.playedCount)
+        repeatJob = scope.launch {
+            while (true) {
+                delay(p.intervalMs)
+                if (!p.nextRepeat()) break
+                vibrateAndLog(state, p.playedCount)
+            }
+            // 최대 횟수까지 울렸는데 탭이 없었다.
+            if (p.expire()) {
+                logger?.logEvent(System.currentTimeMillis(), "NO_ACK", "${state.name} after #${p.playedCount}")
+                publishAwaiting()
+            }
         }
     }
 
+    private fun vibrateAndLog(state: ArrivalState, count: Int) {
+        haptics?.playStrong(state)
+        logger?.logEvent(System.currentTimeMillis(), "VIBRATE", "${state.name} #$count")
+    }
+
+    /** 화면 탭 = 확인. 반복을 멈추고 확인까지 걸린 시간과 울린 횟수를 남긴다. */
+    private fun acknowledge() {
+        val p = policy ?: return
+        val state = p.state
+        val count = p.playedCount
+        if (!p.acknowledge()) return
+        repeatJob?.cancel()
+        repeatJob = null
+        haptics?.cancel()
+        val now = System.currentTimeMillis()
+        logger?.logEvent(now, "ACK", "${state?.name} after #$count in %.1fs".format(Locale.US, (now - firstVibrateAt) / 1000.0))
+        publishAwaiting()
+    }
+
+    private fun publishAwaiting() {
+        val running = GuidanceSession.state.value as? GuidanceState.Running ?: return
+        GuidanceSession.set(running.copy(awaitingAck = policy?.isPending == true))
+    }
+
+    private fun stopRepeat() {
+        repeatJob?.cancel()
+        repeatJob = null
+        policy?.reset()
+        haptics?.cancel()
+    }
+
     private fun finish(arrived: Boolean) {
+        stopRepeat()
         source?.stop()
         source = null
         logger?.close()
@@ -128,6 +210,7 @@ class GuidanceService : Service() {
     }
 
     override fun onDestroy() {
+        stopRepeat()
         source?.stop()
         logger?.close()
         scope.cancel()
@@ -138,6 +221,7 @@ class GuidanceService : Service() {
         private const val CHANNEL = "guidance"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "kr.ac.cnu.balmatchum.STOP"
+        private const val ACTION_ACK = "kr.ac.cnu.balmatchum.ACK"
 
         /** 같은 프로세스 안에서 넘기므로 Intent에 담지 않고 여기에 잠깐 둔다. */
         private var pendingRequest: GuidanceRequest? = null
@@ -145,6 +229,11 @@ class GuidanceService : Service() {
         fun start(context: Context, request: GuidanceRequest) {
             pendingRequest = request
             ContextCompat.startForegroundService(context, Intent(context, GuidanceService::class.java))
+        }
+
+        /** 안내 화면을 탭하면 부른다(확인 진동 모드). */
+        fun acknowledge(context: Context) {
+            context.startService(Intent(context, GuidanceService::class.java).setAction(ACTION_ACK))
         }
 
         fun stop(context: Context) {

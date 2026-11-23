@@ -21,6 +21,7 @@ import androidx.wear.compose.ui.tooling.preview.WearPreviewDevices
 import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.delay
+import kr.ac.cnu.balmatchum.guidance.HapticMode
 import kr.ac.cnu.balmatchum.presentation.Format
 import kr.ac.cnu.balmatchum.presentation.components.ListScreen
 import kr.ac.cnu.balmatchum.presentation.components.buttonItem
@@ -37,6 +38,8 @@ fun TargetTimeScreen(
     deadlineMillis: Long,
     onChange: (newDeadlineMillis: Long) -> Unit,
     onStart: () -> Unit,
+    hapticMode: HapticMode = HapticMode.BASIC,
+    onToggleHapticMode: () -> Unit = {},
     currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     var showPicker by rememberSaveable { mutableStateOf(false) }
@@ -92,6 +95,10 @@ fun TargetTimeScreen(
                 textItem(spec, "지난 시각은 선택할 수 없어요. 현재보다 늦은 시각을 골라 주세요.")
             } else if (!isFuture) {
                 textItem(spec, "목표 시각이 지났어요. 시각을 다시 골라 주세요.")
+            }
+            buttonItem(spec, "진동: ${hapticMode.label}") { onToggleHapticMode() }
+            if (hapticMode == HapticMode.CONFIRM) {
+                textItem(spec, "상태가 바뀌면 화면을 탭할 때까지 진동이 반복돼요 (최대 5회)")
             }
             item {
                 Button(

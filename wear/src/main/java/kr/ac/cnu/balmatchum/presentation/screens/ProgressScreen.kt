@@ -8,6 +8,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,12 +73,31 @@ fun ProgressScreen(
     /** 경로 전체 길이(m). 가장자리 고리를 채우는 데 쓴다. */
     routeDistanceM: Double,
     nextTurn: UpcomingTurn? = null,
+    /** 확인 진동 모드에서 탭을 기다리는 중이면 "탭해서 확인"을 보여 준다. */
+    awaitingAck: Boolean = false,
+    /** 화면을 탭했을 때(확인). null이면 기본 모드라 탭을 받지 않는다. */
+    onAcknowledge: (() -> Unit)? = null,
     onStop: () -> Unit,
 ) {
     val accent = update?.state?.color() ?: Muted
     // 안내 지점이 가까우면(30m 안) 방향 카드를 크게 키운다.
     val nearTurn = nextTurn?.takeIf { it.isNear }?.turn
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .then(
+                if (onAcknowledge != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onAcknowledge,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
         if (update != null && routeDistanceM > 0) {
             ProgressRing((1 - update.remainingM / routeDistanceM).toFloat(), accent)
         }
@@ -92,6 +114,9 @@ fun ProgressScreen(
                 Text(destinationName, color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
             } else if (nearTurn != null) {
                 StateWord(update.state, accent, 18.sp)
+                if (awaitingAck) {
+                    Text("탭해서 확인", color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
                 TurnCard(nextTurn, accent, big = true)
                 Text(
                     "${remainingTime(update)} · ${Format.distance(update.remainingM)} 남음",
@@ -101,6 +126,9 @@ fun ProgressScreen(
                 )
             } else {
                 StateWord(update.state, accent, 32.sp)
+                if (awaitingAck) {
+                    Text("탭해서 확인", color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
                 if (update.state == ArrivalState.TOO_LATE) {
                     Text("뛰어도 ${Format.duration(update.lateAtRunSec)} 지각", color = accent, fontSize = 12.sp)
                 }
@@ -304,4 +332,15 @@ private fun ProgressTurnFarPreview() {
 private fun ProgressTurnNearPreview() {
     val next = UpcomingTurn(RouteTurn.fromTmap(200.0, 12, ""), distanceM = 25.0, isNear = true)
     BalmatchumTheme { ProgressScreen("경영경제연구소", FakeData.update(ArrivalState.HURRY), routeDistanceM = 266.0, next, onStop = {}) }
+}
+
+@WearPreviewDevices
+@Composable
+private fun ProgressAwaitingAckPreview() {
+    BalmatchumTheme {
+        ProgressScreen(
+            "경영경제연구소", FakeData.update(ArrivalState.RUN), routeDistanceM = 266.0,
+            awaitingAck = true, onAcknowledge = {}, onStop = {},
+        )
+    }
 }

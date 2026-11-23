@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kr.ac.cnu.balmatchum.data.DemoRoutes
+import kr.ac.cnu.balmatchum.data.HapticModeStore
 import kr.ac.cnu.balmatchum.data.PhoneDestinationStore
 import kr.ac.cnu.balmatchum.data.SpeedStore
 import kr.ac.cnu.balmatchum.guidance.GuidanceRequest
@@ -27,14 +28,17 @@ class MainActivity : ComponentActivity() {
         PhoneDestinationStore.load(this)
         val demo = DemoRoutes.load(this)
         val speedStore = SpeedStore(applicationContext)
+        val hapticModeStore = HapticModeStore(applicationContext)
         requestMissingPermissions()
 
         setContent {
             BalmatchumApp(
                 demoDestinations = demo,
                 speedStore = speedStore,
+                hapticModeStore = hapticModeStore,
                 startGuidance = ::startGuidance,
                 stopGuidance = { GuidanceService.stop(this) },
+                acknowledge = { GuidanceService.acknowledge(this) },
             )
         }
     }

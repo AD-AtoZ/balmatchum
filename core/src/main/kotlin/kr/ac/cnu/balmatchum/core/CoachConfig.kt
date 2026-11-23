@@ -31,4 +31,8 @@ data class CoachConfig(
     val turnNearM: Double = 30.0,
     /** 안내 지점을 이 거리(m) 지나야 다음 안내 지점으로 넘어간다. GPS가 늦게 따라오는 것을 감안한 값. */
     val turnPassedM: Double = 10.0,
+    /** 확인 진동 모드: 같은 진동을 다시 울리는 간격(ms). 시작값, 미검증. */
+    val confirmRepeatIntervalMs: Long = 4_000,
+    /** 확인 진동 모드: 처음 한 번을 포함한 최대 진동 횟수. 잦은 알림은 시계를 벗게 하므로 제한한다. 시작값, 미검증. */
+    val confirmRepeatMax: Int = 5,
 )
