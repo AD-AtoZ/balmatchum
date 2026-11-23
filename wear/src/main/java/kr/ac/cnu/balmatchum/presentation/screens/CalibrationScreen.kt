@@ -14,8 +14,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.wear.compose.ui.tooling.preview.WearPreviewDevices
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
+import kr.ac.cnu.balmatchum.core.SpeedCalibrator
 import kr.ac.cnu.balmatchum.location.FusedLocationSource
 import kr.ac.cnu.balmatchum.presentation.FakeData
 import kr.ac.cnu.balmatchum.presentation.Format
@@ -37,7 +39,7 @@ private const val MEASURE_SECONDS = 30
 /**
  * 내 속도 측정 화면 (TODOLIST T1).
  * 버튼을 누르면 30초 동안 위치 속도를 모아 대표값을 구하고, 세 가지를 다 재면 저장한다.
- * 대표값 계산은 T2의 SpeedCalibrator가 들어오면 그쪽으로 바꾼다 (아래 temporaryRepresentativeSpeed).
+ * 대표값 계산은 T2의 SpeedCalibrator를 사용한다.
  */
 @Composable
 fun CalibrationScreen(
@@ -54,7 +56,6 @@ fun CalibrationScreen(
     var secondsLeft by remember { mutableIntStateOf(MEASURE_SECONDS) }
     var message by remember { mutableStateOf<String?>(null) }
     val measured = remember { mutableStateMapOf<SpeedKind, Double>() }
-    val samples = remember { mutableListOf<Pair<Long, Double>>() } // (시각 ms, 속도 m/s)
 
     // 측정 중에는 화면이 꺼지지 않게 한다.
     DisposableEffect(measuring != null) {
@@ -65,23 +66,30 @@ fun CalibrationScreen(
     // 측정: 위치 속도를 모으고 30초 세기. 화면을 나가거나 취소하면 이 블록이 취소되어 finally에서 위치 수신을 멈춘다.
     LaunchedEffect(measuring) {
         val kind = measuring ?: return@LaunchedEffect
-        samples.clear()
+        val calibrator = SpeedCalibrator()
         // 가상 걷기(디버그)일 때는 실제 위치 대신 종류별 가짜 속도를 1초마다 넣는다.
         val source = if (simulate) null else FusedLocationSource(context)
-        source?.start { s -> s.speedMps?.let { samples.add(s.timeMillis to it) } }
         try {
+            source?.start { sample ->
+                sample.speedMps?.let { calibrator.add(sample.timeMillis, it) }
+            }
             for (left in MEASURE_SECONDS downTo 1) {
                 secondsLeft = left
-                if (simulate) samples.add(System.currentTimeMillis() to simulatedSpeed(kind))
+                if (simulate) calibrator.add(System.currentTimeMillis(), simulatedSpeed(kind))
                 delay(1_000.milliseconds)
             }
-            val result = temporaryRepresentativeSpeed(samples)
+            val result = calibrator.result()
             if (result == null) {
                 message = "측정에 실패했어요. 계속 걸으며 다시 재 주세요"
             } else {
                 measured[kind] = result
                 message = null
             }
+            measuring = null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            message = "위치 측정을 시작하지 못했어요. 위치 권한과 설정을 확인해 주세요"
             measuring = null
         } finally {
             source?.stop()
@@ -112,6 +120,7 @@ fun CalibrationScreen(
     val shown = saved ?: PersonalSpeeds.DEFAULT
 
     ListScreen(title = "내 속도") { spec ->
+        if (simulate) textItem(spec, "가상 속도 측정: 실제 GPS를 사용하지 않습니다")
         if (kind != null) {
             textItem(spec, "${kind.label} 재는 중")
             textItem(spec, "${left}초 남음. 계속 걸어 주세요")
@@ -153,21 +162,6 @@ private fun simulatedSpeed(kind: SpeedKind): Double = when (kind) {
     SpeedKind.WALK -> 1.1
     SpeedKind.BRISK -> 1.6
     SpeedKind.RUN -> 2.8
-}
-
-/**
- * 임시 계산. T2의 SpeedCalibrator가 저장소에 들어오면 이 함수를 지우고 그걸로 바꾼다.
- * 처음 5초는 버리고, 0.4m/s 미만(멈춤)은 빼고, 남은 값의 중앙값을 쓴다. 쓸 값이 없으면 null.
- */
-private fun temporaryRepresentativeSpeed(samples: List<Pair<Long, Double>>): Double? {
-    val start = samples.firstOrNull()?.first ?: return null
-    val usable = samples
-        .filter { (time, speed) -> time - start >= 5_000 && speed >= 0.4 }
-        .map { it.second }
-        .sorted()
-    if (usable.isEmpty()) return null
-    val mid = usable.size / 2
-    return if (usable.size % 2 == 1) usable[mid] else (usable[mid - 1] + usable[mid]) / 2
 }
 
 @WearPreviewDevices

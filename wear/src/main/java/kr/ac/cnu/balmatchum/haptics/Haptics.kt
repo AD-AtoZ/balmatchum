@@ -36,9 +36,15 @@ class Haptics(context: Context) {
         vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 100, 100, 100), -1))
     }
 
+    /** 갈림길·방향전환 지점에 접근했을 때 길게 한 번. */
+    fun playTurn() {
+        vibrator.vibrate(VibrationEffect.createOneShot(TURN_DURATION_MS, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
+
     private companion object {
         const val SHORT_DURATION_MS = 200L
         const val LONG_DURATION_MS = 600L
         const val PAUSE_MS = 100L
+        const val TURN_DURATION_MS = 800L
     }
 }
