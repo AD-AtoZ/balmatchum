@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kr.ac.cnu.balmatchum.core.ArrivalCoach
 import kr.ac.cnu.balmatchum.core.LocationSample
+import kr.ac.cnu.balmatchum.core.TurnAlertTracker
 import kr.ac.cnu.balmatchum.core.TurnGuide
 import kr.ac.cnu.balmatchum.haptics.Haptics
 import kr.ac.cnu.balmatchum.location.FusedLocationSource
@@ -28,7 +29,7 @@ import kr.ac.cnu.balmatchum.presentation.MainActivity
 /**
  * 안내 중에 화면이 꺼져도 계속 위치를 받고 판단·진동·기록을 하는 포그라운드 서비스.
  *
- * 흐름: 위치 표본 → [ArrivalCoach] 판단 → 상태가 바뀌면 진동 → [GuidanceSession]에 최신 값 → CSV 한 줄.
+ * 위치 표본으로 도착·갈림길 접근·상태 변경을 판단하고 진동·화면·CSV 기록에 반영한다.
  * 목적지 반경에 들어오면 스스로 끝내고 결과를 남긴다.
  */
 class GuidanceService : Service() {
@@ -38,6 +39,7 @@ class GuidanceService : Service() {
     private var logger: CsvLogger? = null
     private var coach: ArrivalCoach? = null
     private var turnGuide: TurnGuide? = null
+    private var turnAlerts = TurnAlertTracker()
     private var firstRemaining: Double? = null
     private var lastRemaining: Double? = null
 
@@ -60,6 +62,7 @@ class GuidanceService : Service() {
         val route = request.destination.tmap.route
         coach = ArrivalCoach(route, request.deadlineMillis, request.speeds)
         turnGuide = TurnGuide(request.destination.tmap.turns, route.totalDistance)
+        turnAlerts = TurnAlertTracker()
         logger = CsvLogger(this, request.destination.name, startedAt)
         val haptics = Haptics(this)
         GuidanceSession.set(GuidanceState.Running(request, startedAt, latest = null))
@@ -79,6 +82,9 @@ class GuidanceService : Service() {
         if (update.arrived) {
             haptics.playArrived()
             finish(arrived = true)
+        } else if (turnAlerts.shouldAlert(nextTurn)) {
+            // 같은 표본에서 상태 변경 진동이 갈림길 진동을 덮어쓰지 않게 우선한다.
+            haptics.playTurn()
         } else if (update.stateChanged) {
             haptics.play(update.state)
         }
