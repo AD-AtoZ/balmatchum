@@ -15,6 +15,14 @@ import java.util.Locale
  *
  * 파일 위치: 워치 앱 내부 `files/logs/날짜_시각_목적지.csv`
  * PC로 가져오기: `adb shell run-as kr.ac.cnu.balmatchum cat files/logs/파일이름.csv > 파일이름.csv`
+ *
+ * 열(뒤 8개는 T22에서 추가. 앞 16개는 예전 기록과 같다)
+ * - lat, lon, accuracy_m, gps_speed_mps: GPS 원본. 위치 콜백이 끊겨 걸음 수로 판정한 줄은 비어 있다
+ * - source: 판정에 쓴 진행 거리 출처(GPS / STEPS 걸음 수 / HOLD 그대로 둠)
+ * - rejected: GPS 위치를 버린 이유(LOW_ACCURACY / JUMP), 안 버렸으면 빈칸
+ * - used_lat, used_lon: 판정에 쓴 위치(다듬은 GPS 위치 또는 경로 위 추정 위치)
+ * - offset_m: 판정에 쓴 위치에서 경로 선까지 거리, dest_m: 경로 끝(목적지 입구 좌표)까지 직선거리
+ * - steps, step_len_m: 안내 시작부터 걸음 수, 지금 쓰는 걸음 길이
  */
 class CsvLogger(context: Context, destinationName: String, private val startedAtMillis: Long) {
 
@@ -27,19 +35,21 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
     init {
         out.println(
             "time,elapsed_s,lat,lon,accuracy_m,gps_speed_mps,moving_speed_mps,remaining_m,remaining_s," +
-                "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m",
+                "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m," +
+                "source,rejected,used_lat,used_lon,offset_m,dest_m,steps,step_len_m",
         )
     }
 
-    fun log(sample: LocationSample, u: CoachUpdate, next: UpcomingTurn?) {
+    /** [sample]은 위치 콜백이 끊겨 걸음 수로 판정한 줄이면 null. */
+    fun log(timeMillis: Long, sample: LocationSample?, u: CoachUpdate, next: UpcomingTurn?) {
         out.println(
             listOf(
-                clock.format(Date(sample.timeMillis)),
-                "%.1f".format(Locale.US, (sample.timeMillis - startedAtMillis) / 1000.0),
-                "%.7f".format(Locale.US, sample.point.lat),
-                "%.7f".format(Locale.US, sample.point.lon),
-                sample.accuracyM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
-                sample.speedMps?.let { "%.2f".format(Locale.US, it) }.orEmpty(),
+                clock.format(Date(timeMillis)),
+                "%.1f".format(Locale.US, (timeMillis - startedAtMillis) / 1000.0),
+                sample?.let { "%.7f".format(Locale.US, it.point.lat) }.orEmpty(),
+                sample?.let { "%.7f".format(Locale.US, it.point.lon) }.orEmpty(),
+                sample?.accuracyM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
+                sample?.speedMps?.let { "%.2f".format(Locale.US, it) }.orEmpty(),
                 "%.2f".format(Locale.US, u.movingSpeedMps),
                 "%.1f".format(Locale.US, u.remainingM),
                 "%.1f".format(Locale.US, u.remainingTimeSec),
@@ -50,6 +60,14 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
                 u.offRoute,
                 next?.let { it.turn?.label ?: "도착" }.orEmpty(),
                 next?.let { "%.1f".format(Locale.US, it.distanceM) }.orEmpty(),
+                u.source.name,
+                u.rejected?.name.orEmpty(),
+                u.position?.let { "%.7f".format(Locale.US, it.lat) }.orEmpty(),
+                u.position?.let { "%.7f".format(Locale.US, it.lon) }.orEmpty(),
+                u.offsetM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
+                u.destinationDistanceM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
+                u.steps,
+                "%.2f".format(Locale.US, u.stepLengthM),
             ).joinToString(","),
         )
     }

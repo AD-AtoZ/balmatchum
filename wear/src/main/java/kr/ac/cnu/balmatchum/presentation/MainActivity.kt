@@ -13,13 +13,16 @@ import kr.ac.cnu.balmatchum.data.PhoneDestinationStore
 import kr.ac.cnu.balmatchum.data.SpeedStore
 import kr.ac.cnu.balmatchum.guidance.GuidanceRequest
 import kr.ac.cnu.balmatchum.guidance.GuidanceService
+import kr.ac.cnu.balmatchum.location.FusedLocationSource
 
 /**
  * 워치 앱 시작점. 권한 요청, 시연 경로 읽기, 안내 서비스 시작·종료만 하고 화면은 [BalmatchumApp]에 맡긴다.
  */
 class MainActivity : ComponentActivity() {
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        warmUpGps()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -37,6 +40,16 @@ class MainActivity : ComponentActivity() {
                 stopGuidance = { GuidanceService.stop(this) },
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        warmUpGps()
+    }
+
+    /** 화면이 열릴 때 GPS를 미리 깨워 둔다. 안내 시작 직후 첫 위치가 튀는 것을 줄인다. */
+    private fun warmUpGps() {
+        if (hasLocationPermission()) FusedLocationSource(applicationContext).warmUp()
     }
 
     private fun startGuidance(request: GuidanceRequest) {
@@ -61,6 +74,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.POST_NOTIFICATIONS,
+            // 걸음 감지 센서. GPS가 나쁜 구간을 걸음 수로 메울 때 쓴다. 거절해도 안내는 된다
+            Manifest.permission.ACTIVITY_RECOGNITION,
         )
     }
 }

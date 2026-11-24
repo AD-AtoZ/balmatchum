@@ -31,4 +31,29 @@ data class CoachConfig(
     val turnNearM: Double = 30.0,
     /** 안내 지점을 이 거리(m) 지나야 다음 안내 지점으로 넘어간다. GPS가 늦게 따라오는 것을 감안한 값. */
     val turnPassedM: Double = 10.0,
+
+    // ---- GPS 보정 (T22). 실보행 4회의 GPS 정확도는 대부분 5~12m였다 ----
+
+    /** GPS 정확도가 이 값(m)보다 나쁘면 그 위치는 판정에 쓰지 않는다. */
+    val maxAccuracyM: Double = 30.0,
+    /** 직전 위치에서 이 속도(m/s)보다 빨리 움직인 것처럼 나오면 튄 위치로 보고 버린다. 사람이 걸어서는 못 내는 속도. */
+    val maxJumpSpeedMps: Double = 5.0,
+    /** 튄 위치로 버리는 것이 이 시간(ms) 이어지면 새 위치를 받아들인다. 정말로 위치가 바뀐 경우에 갇히지 않게. */
+    val jumpResetMillis: Long = 10_000,
+    /** 정확도가 나빠 버리는 것이 이 시간(ms) 이어지면 나빠도 받아들인다. 걸음으로 메우는 최대 시간과 같게 둔다. */
+    val lowAccuracyResetMillis: Long = 60_000,
+    /** 위치 다듬기(칼만 필터)를 쓸지. */
+    val smoothPositions: Boolean = true,
+    /** 칼만 필터가 가정하는 걷는 사람의 가속도 흔들림(m/s²). 크면 위치를 빨리 따라가고, 작으면 더 매끄럽다. */
+    val smoothingAccelNoise: Double = 1.0,
+    /** 경로상 진행이 이 거리(m)보다 크게 뒤로 가면 바로 반영하지 않는다. */
+    val backtrackToleranceM: Double = 3.0,
+    /** 뒤로 간 위치가 이 시간(ms) 이어져야 남은 거리를 늘린다. 한두 번 튄 위치에 남은 거리가 늘지 않게. */
+    val backtrackHoldMillis: Long = 5_000,
+    /** 쓸 만한 GPS 위치가 이 시간(ms) 없으면 걸음 수로 경로를 따라 진행시킨다. */
+    val deadReckonAfterMillis: Long = 3_000,
+    /** 걸음 수로만 진행시키는 최대 시간(ms). 넘으면 진행을 멈추고 GPS를 기다린다(오차가 쌓이지 않게). */
+    val deadReckonMaxMillis: Long = 60_000,
+    /** 걸음 길이(m) 시작값. 안내 중 GPS가 좋을 때 실제 걸음 길이로 고쳐 간다. */
+    val defaultStepLengthM: Double = 0.7,
 )

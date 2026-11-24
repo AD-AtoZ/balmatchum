@@ -27,3 +27,9 @@ internal fun toLocal(origin: GeoPoint, p: GeoPoint): Local = Local(
     x = Math.toRadians(p.lon - origin.lon) * EARTH_RADIUS_M * cos(Math.toRadians(origin.lat)),
     y = Math.toRadians(p.lat - origin.lat) * EARTH_RADIUS_M,
 )
+
+/** [toLocal]의 반대. origin 기준 평면 좌표를 위도·경도로 되돌린다. */
+internal fun fromLocal(origin: GeoPoint, l: Local): GeoPoint = GeoPoint(
+    lat = origin.lat + Math.toDegrees(l.y / EARTH_RADIUS_M),
+    lon = origin.lon + Math.toDegrees(l.x / (EARTH_RADIUS_M * cos(Math.toRadians(origin.lat)))),
+)
