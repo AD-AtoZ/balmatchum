@@ -13,45 +13,118 @@ import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import kr.ac.cnu.balmatchum.core.IndoorFrame
 import kr.ac.cnu.balmatchum.core.IndoorPose
+import kr.ac.cnu.balmatchum.core.MapMatcher
+import kr.ac.cnu.balmatchum.core.MapTransform
+import kr.ac.cnu.balmatchum.core.MatchResult
+import kr.ac.cnu.balmatchum.core.TurnCoverage
+import kr.ac.cnu.balmatchum.core.WallMap
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.Executors
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.atan2
+import kotlin.math.hypot
+
+/** 실내 위치를 잡는 단계. */
+enum class LocateStep {
+    /** 아직 지도에서 어디인지 모른다. */
+    NONE,
+
+    /** 제자리에서 한 바퀴 돌며 주변 점을 모으는 중. */
+    SCANNING,
+
+    /** 모은 점을 지도 전체에 대 보는 중. */
+    SEARCHING,
+
+    /** 후보를 찾았지만 다른 자리와 헷갈린다. 사용자가 쓸지 정한다. */
+    UNSURE,
+
+    /** 지도에서 위치를 찾았다. 워치로 보낸다. */
+    LOCATED,
+}
 
 /** [IndoorTracker]가 화면마다 알려 주는 상태. */
 data class TrackerUpdate(
     /** 카메라가 지금 움직임을 추적하고 있는지. 벽만 보이거나 너무 어두우면 false가 된다. */
     val tracking: Boolean,
-    /** 출발선을 정한 뒤의 위치. 아직 출발선을 정하지 않았거나 추적이 끊기면 null. */
+    /** 지도 기준 위치. 아직 위치를 못 찾았거나 추적이 끊기면 null. */
     val pose: IndoorPose?,
-    /** 카메라가 충분히 앞을 보고 있어 출발선을 정할 수 있는지. */
+    /** 카메라가 충분히 앞을 보고 있어 손으로 출발선을 정할 수 있는지. */
     val canAlign: Boolean,
+    val step: LocateStep = LocateStep.NONE,
+    /** 한 바퀴 돌기에서 지금까지 둘러본 각도. */
+    val scanDegrees: Int = 0,
+    /** 지금 모아 둔 주변 점 개수. */
+    val pointCount: Int = 0,
+    /** 마지막 지도 맞추기 결과. */
+    val lastMatch: MatchResult? = null,
+    /** 마지막으로 지도 맞추기에 성공한 시각(ms). */
+    val lastMatchAt: Long = 0,
 )
 
 /**
  * 실내 시연용 카메라 추적. 실내에서는 GPS가 잡히지 않아, 휴대폰 카메라가 "눈" 역할을 한다.
  *
- * ARCore가 카메라 영상과 움직임 센서로 휴대폰이 얼마나, 어느 쪽으로 움직였는지 미터 단위로 추적한다.
- * 출발선에 서서 복도를 바라보고 [markStart]를 부르면 그 위치와 방향이 기준이 되고,
- * 그 뒤로는 "출발선에서 앞으로·오른쪽으로 몇 m"([IndoorPose])를 [onUpdate]로 알려 준다.
+ * 1. ARCore가 카메라 영상과 움직임 센서로 휴대폰이 얼마나, 어느 쪽으로 움직였는지 추적하고, 여러 장의 사진에서
+ *    벽 모서리·무늬 같은 주변 지점의 3차원 위치(점)를 계산한다.
+ * 2. 처음에 제자리에서 한 바퀴 돌며 모은 점을 스캔 벽 지도([WallMap]) 전체에 대 보고, 가장 잘 겹치는 자리를 찾는다([MapMatcher.localize]).
+ * 3. 걷는 동안 1초마다 최근 점을 지도 근처에 다시 대 보고, 추적이 틀어진 만큼 조금씩 바로잡는다([MapMatcher.refine]).
+ * 4. 지도 기준 위치를 [IndoorPose]로 [onUpdate]에 알려 준다. 워치로 보내는 일은 화면이 한다.
  *
  * ARCore는 화면을 그리는 스레드에서만 갱신할 수 있어서 [GLSurfaceView.Renderer]로 만든다.
- * [onUpdate]도 그 스레드에서 불린다.
+ * 지도 맞추기는 무거워서 별도 스레드에서 하고, [onUpdate]는 그리기 스레드에서 불린다.
  */
 class IndoorTracker(
     private val activity: Activity,
+    private val wallMap: WallMap?,
     private val onUpdate: (TrackerUpdate) -> Unit,
 ) : GLSurfaceView.Renderer {
 
     @Volatile
     private var session: Session? = null
 
+    /** 추적 좌표 → 지도 좌표. 위치를 찾기 전에는 null. */
     @Volatile
-    private var frame: IndoorFrame? = null
+    private var transform: MapTransform? = null
+
+    @Volatile
+    private var step = LocateStep.NONE
+
+    @Volatile
+    private var pendingResult: MatchResult? = null
+
+    @Volatile
+    private var lastMatch: MatchResult? = null
+
+    @Volatile
+    private var lastMatchAt = 0L
+
+    /** 걷는 중 지도로 바로잡기를 할지. 끄면 처음 찾은 위치에서 카메라 이동량만 쓴다. */
+    @Volatile
+    var refineEnabled = true
 
     @Volatile
     private var markStartRequested = false
+
+    @Volatile
+    private var matching = false
+
+    @Volatile
+    private var scanResetRequested = false
+
+    @Volatile
+    private var searchRequested = false
+
+    private val matcher = wallMap?.let { MapMatcher(it) }
+    private val worker = Executors.newSingleThreadExecutor()
+    private val coverage = TurnCoverage()
+
+    /** 주변 점. ARCore가 점마다 붙여 주는 번호로 묶어 가장 최근 위치만 둔다. 그리기 스레드에서만 만진다. */
+    private val points = HashMap<Int, StoredPoint>()
+    private var lastPointCloudTime = 0L
+    private var lastRefineAt = 0L
 
     private var installRequested = false
     private var surface: GLSurfaceView? = null
@@ -60,6 +133,8 @@ class IndoorTracker(
     private var viewportWidth = 0
     private var viewportHeight = 0
     private var viewportChanged = false
+
+    private class StoredPoint(val x: Float, val y: Float, val z: Float, val seenAt: Long)
 
     /** 화면에 넣을 뷰가 만들어지면 알려 준다. 카메라 영상이 여기에 그려진다. */
     fun attach(view: GLSurfaceView) {
@@ -90,7 +165,7 @@ class IndoorTracker(
                     Config(created).apply {
                         updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                         focusMode = Config.FocusMode.AUTO
-                        // 위치 추적만 쓰므로 바닥·벽 찾기와 조명 추정은 끈다.
+                        // 이동 추적과 주변 점만 쓰므로 바닥·벽 찾기와 조명 추정은 끈다.
                         planeFindingMode = Config.PlaneFindingMode.DISABLED
                         lightEstimationMode = Config.LightEstimationMode.DISABLED
                     },
@@ -116,17 +191,35 @@ class IndoorTracker(
     fun close() {
         session?.close()
         session = null
-        frame = null
+        transform = null
+        worker.shutdownNow()
     }
 
-    /** 지금 서 있는 곳과 바라보는 방향을 출발선으로 삼는다. 다음 화면부터 적용된다. */
+    /** 제자리에서 한 바퀴 돌며 출발 위치 찾기를 시작한다. 지도가 없으면 아무것도 하지 않는다. */
+    fun startScan() {
+        if (matcher == null) return
+        transform = null
+        pendingResult = null
+        step = LocateStep.SCANNING
+        scanResetRequested = true
+    }
+
+    /** 한 바퀴를 다 돌기 전이라도 지금까지 모은 점으로 찾는다. */
+    fun searchNow() {
+        if (step == LocateStep.SCANNING) searchRequested = true
+    }
+
+    /** 헷갈린다고 나온 후보를 그래도 쓴다. */
+    fun acceptPending() {
+        val result = pendingResult ?: return
+        transform = result.transform
+        pendingResult = null
+        step = LocateStep.LOCATED
+    }
+
+    /** 지금 서 있는 곳과 바라보는 방향을 출발선(앞으로 0m, 옆으로 0m)으로 삼는다. 지도 없이도 쓸 수 있는 예비 방법. */
     fun markStart() {
         markStartRequested = true
-    }
-
-    /** 출발선을 지우고 위치 보내기를 멈춘다. */
-    fun clearStart() {
-        frame = null
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -149,34 +242,174 @@ class IndoorTracker(
                 viewportChanged = false
             }
             current.setCameraTextureName(cameraTexture)
-            val arFrame = current.update()
-            background.draw(arFrame)
+            val frame = current.update()
+            background.draw(frame)
 
-            val camera = arFrame.camera
+            val camera = frame.camera
             if (camera.trackingState != TrackingState.TRACKING) {
-                onUpdate(TrackerUpdate(tracking = false, pose = null, canAlign = false))
+                onUpdate(status(tracking = false, pose = null, canAlign = false))
                 return
             }
+            val now = System.currentTimeMillis()
+            val cam = camera.pose
+            val camX = cam.tx().toDouble()
+            val camY = cam.ty()
+            val camZ = cam.tz().toDouble()
             // 카메라 좌표계에서 -z가 바라보는 방향이다. 그 방향의 수평 성분(x, z)만 쓴다.
-            val pose = camera.pose
-            val zAxis = pose.zAxis
+            val zAxis = cam.zAxis
             val viewX = -zAxis[0].toDouble()
             val viewZ = -zAxis[2].toDouble()
             val canAlign = IndoorFrame.canAlign(viewX, viewZ)
-            if (markStartRequested && canAlign) {
-                frame = IndoorFrame(pose.tx().toDouble(), pose.tz().toDouble(), viewX, viewZ)
-                markStartRequested = false
+
+            if (scanResetRequested) {
+                scanResetRequested = false
+                points.clear()
+                coverage.clear()
             }
-            onUpdate(
-                TrackerUpdate(
-                    tracking = true,
-                    pose = frame?.toPose(pose.tx().toDouble(), pose.tz().toDouble(), viewX, viewZ, System.currentTimeMillis()),
-                    canAlign = canAlign,
-                ),
-            )
+            collectPoints(frame, now)
+            if (step == LocateStep.SCANNING) {
+                coverage.add(viewX, viewZ)
+                if ((coverage.enough || searchRequested) && points.size >= MIN_SCAN_POINTS) {
+                    searchRequested = false
+                    startLocalize(camX, camY, camZ, now)
+                }
+            }
+            if (markStartRequested && canAlign) {
+                markStartRequested = false
+                // 바라보는 방향이 지도의 앞쪽(forward)이 되도록 돌리고, 지금 자리를 출발선으로 놓는다.
+                transform = MapTransform.placing(camX, camZ, 0.0, 0.0, -atan2(viewZ, viewX))
+                pendingResult = null
+                step = LocateStep.LOCATED
+            }
+            if (step == LocateStep.LOCATED && refineEnabled && matcher != null && !matching &&
+                now - lastRefineAt >= REFINE_INTERVAL_MILLIS
+            ) {
+                lastRefineAt = now
+                startRefine(camX, camY, camZ, now)
+            }
+
+            val t = transform
+            onUpdate(status(tracking = true, pose = t?.toPose(camX, camZ, viewX, viewZ, now), canAlign = canAlign))
         } catch (e: Exception) {
             // 화면이 꺼지는 순간 등 카메라를 잠깐 쓸 수 없을 때. 다음 화면에서 다시 시도한다.
         }
+    }
+
+    private fun status(tracking: Boolean, pose: IndoorPose?, canAlign: Boolean) = TrackerUpdate(
+        tracking = tracking,
+        pose = pose,
+        canAlign = canAlign,
+        step = step,
+        scanDegrees = coverage.degrees,
+        pointCount = points.size,
+        lastMatch = pendingResult ?: lastMatch,
+        lastMatchAt = lastMatchAt,
+    )
+
+    /** 이번 화면의 주변 점을 모은다. 오래된 점은 버린다(한 바퀴 돌기 중에는 모두 둔다). */
+    private fun collectPoints(frame: Frame, now: Long) {
+        frame.acquirePointCloud().use { cloud ->
+            if (cloud.timestamp == lastPointCloudTime) return
+            lastPointCloudTime = cloud.timestamp
+            val xyzc = cloud.points
+            val ids = cloud.ids
+            val n = ids.remaining()
+            for (i in 0 until n) {
+                val confidence = xyzc.get(i * 4 + 3)
+                if (confidence < MIN_CONFIDENCE) continue
+                points[ids.get(i)] = StoredPoint(xyzc.get(i * 4), xyzc.get(i * 4 + 1), xyzc.get(i * 4 + 2), now)
+            }
+        }
+        if (step != LocateStep.SCANNING && step != LocateStep.SEARCHING) {
+            points.values.removeAll { now - it.seenAt > KEEP_MILLIS }
+        }
+        if (points.size > MAX_STORED_POINTS) {
+            val oldest = points.entries.sortedBy { it.value.seenAt }.take(points.size - MAX_STORED_POINTS).map { it.key }
+            oldest.forEach { points.remove(it) }
+        }
+    }
+
+    /** 지도 맞추기에 쓸 점: 카메라와 비슷한 높이(바닥·천장 제외), 가까운 것만. */
+    private fun snapshot(camX: Double, camY: Float, camZ: Double): DoubleArray {
+        val out = ArrayList<Double>(points.size * 2)
+        for (p in points.values) {
+            val dy = p.y - camY
+            if (dy < HEIGHT_BELOW || dy > HEIGHT_ABOVE) continue
+            if (hypot(p.x - camX, p.z - camZ) > MAX_RANGE_M) continue
+            out += p.x.toDouble()
+            out += p.z.toDouble()
+        }
+        return out.toDoubleArray()
+    }
+
+    private fun startLocalize(camX: Double, camY: Float, camZ: Double, now: Long) {
+        val m = matcher ?: return
+        val pts = snapshot(camX, camY, camZ)
+        step = LocateStep.SEARCHING
+        matching = true
+        worker.execute {
+            val result = runCatching { m.localize(pts, camX, camZ) }.getOrNull()
+            matching = false
+            when {
+                result == null || result.score < ACCEPT_SCORE -> {
+                    // 점이 모자라거나 잘 맞는 자리가 없다. 더 둘러보게 한다.
+                    lastMatch = result
+                    step = LocateStep.SCANNING
+                }
+                result.ambiguous -> {
+                    pendingResult = result
+                    step = LocateStep.UNSURE
+                }
+                else -> {
+                    lastMatch = result
+                    lastMatchAt = now
+                    transform = result.transform
+                    step = LocateStep.LOCATED
+                }
+            }
+        }
+    }
+
+    private fun startRefine(camX: Double, camY: Float, camZ: Double, now: Long) {
+        val m = matcher ?: return
+        val current = transform ?: return
+        val pts = snapshot(camX, camY, camZ)
+        matching = true
+        worker.execute {
+            val result = runCatching { m.refine(pts, current, camX, camZ) }.getOrNull()
+            matching = false
+            if (result != null) {
+                lastMatch = result
+                lastMatchAt = now
+                // 그사이 사용자가 다시 찾기를 눌렀으면 덮어쓰지 않는다. 한 번에 튀지 않게 절반만 옮긴다.
+                if (step == LocateStep.LOCATED && transform === current) {
+                    transform = current.blend(result.transform, REFINE_WEIGHT)
+                }
+            }
+        }
+    }
+
+    private companion object {
+        /** ARCore 점의 확신도(0~1)가 이보다 낮으면 버린다. */
+        const val MIN_CONFIDENCE = 0.2f
+
+        /** 한 바퀴 돌기에서 이만큼은 모여야 찾기를 시작한다. */
+        const val MIN_SCAN_POINTS = 120
+
+        /** 걷는 중에는 이 시간(ms) 안에 본 점만 둔다. */
+        const val KEEP_MILLIS = 15_000L
+        const val MAX_STORED_POINTS = 4_000
+
+        /** 카메라 높이 기준으로 이 사이의 점만 쓴다(m). 지도는 바닥에서 0.4~2.0m 높이의 벽으로 만들었다. */
+        const val HEIGHT_BELOW = -1.0f
+        const val HEIGHT_ABOVE = 0.8f
+        const val MAX_RANGE_M = 12.0
+
+        const val REFINE_INTERVAL_MILLIS = 1_000L
+        const val REFINE_WEIGHT = 0.5
+
+        /** 처음 위치 찾기 결과를 받아들이는 최소 점수. [kr.ac.cnu.balmatchum.core.MatchConfig.acceptScore]와 같게 둔다. */
+        const val ACCEPT_SCORE = 0.45
     }
 }
 
