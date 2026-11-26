@@ -36,6 +36,9 @@ class WallMap(
         return (distance[li * forwardCells + fi].toInt() and 0xFF) * cellM
     }
 
+    /** 칸([fi], [li])에서 가장 가까운 벽까지 거리(칸 수, 0~255). 미니맵을 그릴 때 쓴다. */
+    fun cellDistance(fi: Int, li: Int): Int = distance[li * forwardCells + fi].toInt() and 0xFF
+
     val forwardMax: Double get() = forwardMin + forwardCells * cellM
     val lateralMax: Double get() = lateralMin + lateralCells * cellM
 

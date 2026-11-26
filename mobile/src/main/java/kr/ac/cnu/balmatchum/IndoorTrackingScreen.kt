@@ -7,11 +7,13 @@ import android.opengl.GLSurfaceView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -115,10 +117,20 @@ fun IndoorTrackingScreen(modifier: Modifier = Modifier, onClose: () -> Unit) {
         )
 
         if (hasCamera) {
-            AndroidView(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                factory = { viewContext -> GLSurfaceView(viewContext).also { tracker.attach(it) } },
-            )
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { viewContext -> GLSurfaceView(viewContext).also { tracker.attach(it) } },
+                )
+                if (wallMap != null) {
+                    IndoorMiniMap(
+                        map = wallMap,
+                        pose = state.pose,
+                        seenPoints = state.seenPoints,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(width = 150.dp, height = 220.dp),
+                    )
+                }
+            }
         } else {
             Text("카메라 권한을 기다리는 중입니다.", modifier = Modifier.weight(1f))
         }

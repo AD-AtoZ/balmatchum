@@ -62,6 +62,8 @@ data class TrackerUpdate(
     val lastMatch: MatchResult? = null,
     /** 마지막으로 지도 맞추기에 성공한 시각(ms). */
     val lastMatchAt: Long = 0,
+    /** 마지막 지도 맞추기에 쓴 카메라 점을 지도 좌표로 옮긴 것(forward, lateral 순서로 이어 붙임). 미니맵에 그린다. */
+    val seenPoints: FloatArray? = null,
 )
 
 /**
@@ -100,6 +102,9 @@ class IndoorTracker(
 
     @Volatile
     private var lastMatchAt = 0L
+
+    @Volatile
+    private var seenPoints: FloatArray? = null
 
     /** 걷는 중 지도로 바로잡기를 할지. 끄면 처음 찾은 위치에서 카메라 이동량만 쓴다. */
     @Volatile
@@ -304,6 +309,7 @@ class IndoorTracker(
         pointCount = points.size,
         lastMatch = pendingResult ?: lastMatch,
         lastMatchAt = lastMatchAt,
+        seenPoints = seenPoints,
     )
 
     /** 이번 화면의 주변 점을 모은다. 오래된 점은 버린다(한 바퀴 돌기 중에는 모두 둔다). */
@@ -349,6 +355,7 @@ class IndoorTracker(
         matching = true
         worker.execute {
             val result = runCatching { m.localize(pts, camX, camZ) }.getOrNull()
+            if (result != null) seenPoints = toMap(pts, result.transform)
             matching = false
             when {
                 result == null || result.score < ACCEPT_SCORE -> {
@@ -379,6 +386,7 @@ class IndoorTracker(
             val result = runCatching { m.refine(pts, current, camX, camZ) }.getOrNull()
             matching = false
             if (result != null) {
+                seenPoints = toMap(pts, result.transform)
                 lastMatch = result
                 lastMatchAt = now
                 // 그사이 사용자가 다시 찾기를 눌렀으면 덮어쓰지 않는다. 한 번에 튀지 않게 절반만 옮긴다.
@@ -389,7 +397,23 @@ class IndoorTracker(
         }
     }
 
+    /** 추적 좌표의 점(x, z)을 지도 좌표(forward, lateral)로 옮긴다. 미니맵에 많이 그리지 않게 [MAX_SHOWN_POINTS]개까지만. */
+    private fun toMap(xz: DoubleArray, t: MapTransform): FloatArray {
+        val n = minOf(xz.size / 2, MAX_SHOWN_POINTS)
+        val stride = maxOf(1, (xz.size / 2) / n)
+        return FloatArray(n * 2).also { out ->
+            for (i in 0 until n) {
+                val x = xz[2 * i * stride]
+                val z = xz[2 * i * stride + 1]
+                out[2 * i] = t.forward(x, z).toFloat()
+                out[2 * i + 1] = t.lateral(x, z).toFloat()
+            }
+        }
+    }
+
     private companion object {
+        const val MAX_SHOWN_POINTS = 300
+
         /** ARCore 점의 확신도(0~1)가 이보다 낮으면 버린다. */
         const val MIN_CONFIDENCE = 0.2f
 
