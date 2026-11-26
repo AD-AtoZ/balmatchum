@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kr.ac.cnu.balmatchum.core.CoachUpdate
 import kr.ac.cnu.balmatchum.core.UpcomingTurn
 import kr.ac.cnu.balmatchum.core.Destination
+import kr.ac.cnu.balmatchum.core.IndoorSettings
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
 
 /** 안내를 시작할 때 화면이 서비스에 넘기는 값. */
@@ -15,6 +16,8 @@ data class GuidanceRequest(
     val speeds: PersonalSpeeds,
     /** null이면 실제 위치(GPS·Wi-Fi). 값이 있으면 그 속도(m/s)로 경로를 따라 가상으로 걷는다. */
     val simulatedSpeedMps: Double? = null,
+    /** 실내 시연 설정. 값이 있으면 GPS 없이 걸음 수만으로 경로를 따라 진행시킨다. */
+    val indoor: IndoorSettings? = null,
 )
 
 /** 안내가 끝났을 때 결과 화면에 보여 줄 값. */

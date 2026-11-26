@@ -14,6 +14,7 @@ import androidx.wear.compose.material3.AppScaffold
 import kotlinx.coroutines.launch
 import kr.ac.cnu.balmatchum.BuildConfig
 import kr.ac.cnu.balmatchum.core.Destination
+import kr.ac.cnu.balmatchum.core.IndoorDemo
 import kr.ac.cnu.balmatchum.core.PersonalSpeeds
 import kr.ac.cnu.balmatchum.data.PhoneDestinationStore
 import kr.ac.cnu.balmatchum.data.SpeedStore
@@ -42,7 +43,10 @@ private val SIMULATION_OPTIONS = listOf<Pair<String, Double?>>(
 /**
  * 화면 이동과 화면 사이 데이터 전달만 맡는다. 각 화면의 모양은 screens/ 아래 파일에서 바꾼다.
  *
+ * 목록 맨 아래의 실내 시연은 목표 시각 화면을 거치지 않고 누르는 순간 출발한다(목표 시각이 초 단위라서).
+ *
  * @param startGuidance 안내 시작. 위치 권한 확인과 서비스 시작은 MainActivity가 한다.
+ * @param confirmCheckpoint 실내 시연에서 체크포인트를 지났다고 알린다.
  */
 @Composable
 fun BalmatchumApp(
@@ -50,6 +54,7 @@ fun BalmatchumApp(
     speedStore: SpeedStore,
     startGuidance: (GuidanceRequest) -> Unit,
     stopGuidance: () -> Unit,
+    confirmCheckpoint: () -> Unit,
 ) {
     val guidance by GuidanceSession.state.collectAsState()
     val phoneDestination by PhoneDestinationStore.latest.collectAsState()
@@ -62,7 +67,8 @@ fun BalmatchumApp(
     var deadline by remember { mutableLongStateOf(0L) }
     var simulationIndex by remember { mutableStateOf(0) }
 
-    val destinations = listOfNotNull(phoneDestination) + demoDestinations
+    val indoorDestination = remember { IndoorDemo.destination() }
+    val destinations = listOfNotNull(phoneDestination) + demoDestinations + indoorDestination
 
     // 서비스가 안내를 시작하거나 끝내면 화면을 따라 바꾼다.
     LaunchedEffect(guidance) {
@@ -90,10 +96,22 @@ fun BalmatchumApp(
                     onCycleSimulate = { simulationIndex = (simulationIndex + 1) % SIMULATION_OPTIONS.size },
                     onPick = { i ->
                         val d = destinations[i]
-                        selected = d
-                        deadline = d.arrivalTimeMillis?.takeIf { it > System.currentTimeMillis() }
-                            ?: defaultDeadline(d)
-                        screen = Screen.TARGET_TIME
+                        if (d === indoorDestination) {
+                            val indoor = IndoorDemo.settings
+                            startGuidance(
+                                GuidanceRequest(
+                                    destination = d,
+                                    deadlineMillis = System.currentTimeMillis() + IndoorDemo.targetSec() * 1_000L,
+                                    speeds = indoor.speeds(speeds),
+                                    indoor = indoor,
+                                ),
+                            )
+                        } else {
+                            selected = d
+                            deadline = d.arrivalTimeMillis?.takeIf { it > System.currentTimeMillis() }
+                                ?: defaultDeadline(d)
+                            screen = Screen.TARGET_TIME
+                        }
                     },
                 )
 
@@ -123,6 +141,8 @@ fun BalmatchumApp(
                         routeDistanceM = running?.request?.destination?.tmap?.route?.totalDistance ?: 0.0,
                         nextTurn = running?.nextTurn,
                         onStop = stopGuidance,
+                        indoor = running?.request?.indoor != null,
+                        onCheckpoint = confirmCheckpoint,
                     )
                 }
 

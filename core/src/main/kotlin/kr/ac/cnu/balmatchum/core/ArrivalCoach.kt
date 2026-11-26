@@ -42,7 +42,7 @@ data class CoachUpdate(
     val stateChanged: Boolean,
     val offRoute: Boolean,
     val offRouteChanged: Boolean,
-    /** 도착. GPS 위치로만 판정한다(걸음 수로 메운 진행으로는 도착시키지 않는다). */
+    /** 도착. GPS 위치로만 판정한다(걸음 수로 메운 진행으로는 도착시키지 않는다). 실내 시연은 걸음 수로 판정한다. */
     val arrived: Boolean,
     /** 이번 판정에 쓴 진행 거리의 출처. 기록·분석용. */
     val source: PositionSource = PositionSource.GPS,
@@ -58,6 +58,12 @@ data class CoachUpdate(
     val steps: Int = 0,
     /** 지금 쓰는 걸음 길이(m). */
     val stepLengthM: Double = 0.0,
+    /** 최근 분당 걸음 수. 실내 시연에서만 잰다. */
+    val cadenceSpm: Double? = null,
+    /** 다음 체크포인트까지 경로상 남은 거리(m). 기다리는 체크포인트가 없으면 null. 실내 시연에서만 쓴다. */
+    val checkpointRemainingM: Double? = null,
+    /** 지금 체크포인트 통과 확인을 받을 수 있는지. 화면에 확인 버튼을 띄울 때 쓴다. */
+    val checkpointConfirmable: Boolean = false,
 )
 
 /**
@@ -69,14 +75,18 @@ data class CoachUpdate(
  * 3. 경로상 진행이 잠깐 뒤로 가는 것은 [CoachConfig.backtrackHoldMillis] 동안 반영하지 않는다
  * 4. 쓸 만한 GPS가 [CoachConfig.deadReckonAfterMillis] 넘게 없으면 걸음 수로 경로를 따라 진행시킨다([StepTracker])
  *
+ * 실내 시연([indoor])에서는 GPS를 쓰지 않고 [updateIndoor]로 걸음 수만으로 진행시킨다.
+ *
  * @param deadlineMillis 도착 목표 시각(epoch ms)
  * @param speeds 사용자가 미리 잰 자기 속도. 상태 판단 기준
+ * @param indoor 실내 시연 설정. null이면 실외(GPS) 안내
  */
 class ArrivalCoach(
     val route: Route,
     val deadlineMillis: Long,
     val speeds: PersonalSpeeds = PersonalSpeeds.DEFAULT,
     private val config: CoachConfig = CoachConfig(),
+    private val indoor: IndoorSettings? = null,
 ) {
     private val speed = MovingSpeedEstimator(config)
     private val debouncer = StateDebouncer<ArrivalState>(config.stateHoldMillis)
@@ -84,6 +94,7 @@ class ArrivalCoach(
     private val gate = LocationGate(config)
     private val smoother = PositionSmoother(config.smoothingAccelNoise)
     private val stepTracker = StepTracker(config.defaultStepLengthM)
+    private val cadence = CadenceMeter()
 
     /** 마지막으로 받아들인 GPS 원본 표본. 속도 계산용. */
     private var lastSample: LocationSample? = null
@@ -96,6 +107,11 @@ class ArrivalCoach(
     private var stepsAtAlong = 0
     private var stepsAtGps = 0
     private var alongAtGps = 0.0
+
+    /** 통과를 확인한 체크포인트 개수. */
+    private var checkpointsPassed = 0
+    private var lastCadenceSpm: Double? = null
+    private var indoorStepLengthM = indoor?.walk?.stepLengthM ?: 0.0
 
     /** 걸음 센서가 걸음을 감지할 때마다 부른다. */
     fun onStep(count: Int = 1) = stepTracker.onStep(count)
@@ -128,6 +144,46 @@ class ArrivalCoach(
      * 남은 시간만 줄여 판정한다.
      */
     fun updateWithoutGps(timeMillis: Long): CoachUpdate = estimate(timeMillis, null)
+
+    /**
+     * 실내 시연에서 1초마다 부른다. 출발점에서 시작해, 그사이 감지한 걸음 수 × 걸음 길이만큼 경로를 따라 진행시킨다.
+     * 걸음 길이는 최근 분당 걸음 수에 맞춰 고른다. 통과를 확인하지 않은 체크포인트는 넘지 않는다.
+     */
+    fun updateIndoor(timeMillis: Long): CoachUpdate {
+        val settings = requireNotNull(indoor) { "실내 시연 설정이 없다" }
+        val t = monotonic(timeMillis)
+        val base = lastAlong ?: 0.0
+        val newSteps = stepTracker.steps - stepsAtAlong
+        val spm = cadence.add(t, stepTracker.steps)
+        val stepLength = settings.stepLength(spm)
+        val limit = nextCheckpointM() ?: route.totalDistance
+        val along = minOf(limit, base + newSteps * stepLength)
+
+        // 체크포인트에 막혀 있어도 걷고 있으면 걷는 속도를 보여 준다.
+        speed.add(t, if (spm != null) spm / 60.0 * stepLength else 0.0)
+        lastCadenceSpm = spm
+        indoorStepLengthM = stepLength
+        setAlong(along)
+        return build(
+            t, along, if (newSteps > 0) PositionSource.STEPS else PositionSource.HOLD, rejected = null,
+            position = null, offsetM = null, offRouteChanged = false,
+        )
+    }
+
+    /**
+     * 사용자가 체크포인트를 지나며 화면을 눌렀을 때 부른다. 진행 거리를 체크포인트 위치로 맞추고 그 뒤로 나아가게 한다.
+     * 걸음 수 추정이 앞서 있었든 뒤처져 있었든 여기서 바로잡힌다. 받아들였으면 true.
+     */
+    fun confirmCheckpoint(): Boolean {
+        val settings = indoor ?: return false
+        val checkpoint = nextCheckpointM() ?: return false
+        if (checkpoint - (lastAlong ?: 0.0) > settings.checkpointConfirmRangeM) return false
+        checkpointsPassed++
+        setAlong(checkpoint)
+        return true
+    }
+
+    private fun nextCheckpointM(): Double? = indoor?.checkpointsM?.getOrNull(checkpointsPassed)
 
     private fun estimate(timeMillis: Long, rejected: RejectReason?): CoachUpdate {
         val t = monotonic(timeMillis)
@@ -163,6 +219,7 @@ class ArrivalCoach(
         val judgement = judge(remaining, remainingTimeSec, speeds, config)
         val stateChanged = debouncer.update(t, judgement.state)
         val used = position ?: route.pointAt(along)
+        val checkpointRemaining = nextCheckpointM()?.let { (it - along).coerceAtLeast(0.0) }
 
         return CoachUpdate(
             remainingM = remaining,
@@ -176,14 +233,22 @@ class ArrivalCoach(
             stateChanged = stateChanged,
             offRoute = offRoute.isOffRoute,
             offRouteChanged = offRouteChanged,
-            arrived = source == PositionSource.GPS && remaining <= config.arrivalRadiusM,
+            arrived = if (indoor != null) {
+                remaining <= indoor.arrivalRadiusM
+            } else {
+                source == PositionSource.GPS && remaining <= config.arrivalRadiusM
+            },
             source = source,
             rejected = rejected,
             position = used,
             offsetM = offsetM,
             destinationDistanceM = distanceMeters(used, route.points.last()),
             steps = stepTracker.steps,
-            stepLengthM = stepTracker.stepLengthM,
+            stepLengthM = if (indoor != null) indoorStepLengthM else stepTracker.stepLengthM,
+            cadenceSpm = lastCadenceSpm,
+            checkpointRemainingM = checkpointRemaining,
+            checkpointConfirmable = indoor != null && checkpointRemaining != null &&
+                checkpointRemaining <= indoor.checkpointConfirmRangeM,
         )
     }
 

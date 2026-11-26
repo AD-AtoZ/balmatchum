@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -40,6 +41,9 @@ import kr.ac.cnu.balmatchum.presentation.MainActivity
  *
  * 실제 위치로 안내할 때는 걸음 센서도 켠다. 위치 콜백이 [NO_GPS_MILLIS] 넘게 오지 않으면
  * 1초마다 [ArrivalCoach.updateWithoutGps]로 걸음 수 기반 판정을 이어 간다(T22).
+ *
+ * 실내 시연([GuidanceRequest.indoor])에서는 위치를 아예 받지 않고 걸음 센서만 켜서
+ * 1초마다 [ArrivalCoach.updateIndoor]로 판정한다.
  */
 class GuidanceService : Service() {
 
@@ -62,6 +66,10 @@ class GuidanceService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> finish(arrived = false)
+            ACTION_CHECKPOINT -> {
+                // 안내 중이 아닐 때 들어오면 서비스만 떠 있지 않게 바로 끝낸다.
+                if (coach == null) stopSelf() else coach?.confirmCheckpoint()
+            }
             else -> begin()
         }
         return START_NOT_STICKY
@@ -74,7 +82,7 @@ class GuidanceService : Service() {
 
         val startedAt = System.currentTimeMillis()
         val route = request.destination.tmap.route
-        coach = ArrivalCoach(route, request.deadlineMillis, request.speeds)
+        coach = ArrivalCoach(route, request.deadlineMillis, request.speeds, indoor = request.indoor)
         turnGuide = TurnGuide(request.destination.tmap.turns, route.totalDistance)
         turnAlerts = TurnAlertTracker()
         logger = CsvLogger(this, request.destination.name, startedAt)
@@ -82,6 +90,10 @@ class GuidanceService : Service() {
         GuidanceSession.set(GuidanceState.Running(request, startedAt, latest = null))
 
         lastSampleAt = null
+        if (request.indoor != null) {
+            beginIndoor(request, startedAt, haptics)
+            return
+        }
         source = request.simulatedSpeedMps?.let { ReplayLocationSource(route, it, scope) } ?: FusedLocationSource(this)
         source?.start { sample -> onSample(sample, request, startedAt, haptics) }
         if (request.simulatedSpeedMps == null) {
@@ -95,6 +107,24 @@ class GuidanceService : Service() {
                     val update = coach?.updateWithoutGps(now) ?: continue
                     handle(now, null, update, request, startedAt, haptics)
                 }
+            }
+        }
+    }
+
+    /** 실내 시연: 위치 없이 걸음 센서만 켜고 1초마다 판정한다. */
+    private fun beginIndoor(request: GuidanceRequest, startedAt: Long, haptics: Haptics) {
+        val stepSource = StepSource(this)
+        stepSource.start { n -> coach?.onStep(n) }
+        steps = stepSource
+        if (!stepSource.isActive) {
+            Toast.makeText(this, "걸음 센서를 쓸 수 없습니다. 신체 활동 권한을 확인하세요", Toast.LENGTH_LONG).show()
+        }
+        noGpsTicker = scope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val update = coach?.updateIndoor(now) ?: break
+                handle(now, null, update, request, startedAt, haptics)
+                delay(1_000)
             }
         }
     }
@@ -192,6 +222,7 @@ class GuidanceService : Service() {
         private const val CHANNEL = "guidance"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "kr.ac.cnu.balmatchum.STOP"
+        private const val ACTION_CHECKPOINT = "kr.ac.cnu.balmatchum.CHECKPOINT"
 
         /** 위치 콜백이 이 시간(ms) 넘게 없으면 걸음 수로 판정을 이어 간다. */
         private const val NO_GPS_MILLIS = 3_000L
@@ -206,6 +237,11 @@ class GuidanceService : Service() {
 
         fun stop(context: Context) {
             context.startService(Intent(context, GuidanceService::class.java).setAction(ACTION_STOP))
+        }
+
+        /** 실내 시연에서 체크포인트를 지났다고 알린다. */
+        fun checkpoint(context: Context) {
+            context.startService(Intent(context, GuidanceService::class.java).setAction(ACTION_CHECKPOINT))
         }
     }
 }

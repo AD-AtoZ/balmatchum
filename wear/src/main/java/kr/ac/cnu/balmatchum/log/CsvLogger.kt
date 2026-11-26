@@ -23,6 +23,7 @@ import java.util.Locale
  * - used_lat, used_lon: 판정에 쓴 위치(다듬은 GPS 위치 또는 경로 위 추정 위치)
  * - offset_m: 판정에 쓴 위치에서 경로 선까지 거리, dest_m: 경로 끝(목적지 입구 좌표)까지 직선거리
  * - steps, step_len_m: 안내 시작부터 걸음 수, 지금 쓰는 걸음 길이
+ * - cadence_spm, checkpoint_m: 실내 시연에서만 채운다. 최근 분당 걸음 수, 다음 체크포인트까지 남은 거리
  */
 class CsvLogger(context: Context, destinationName: String, private val startedAtMillis: Long) {
 
@@ -36,7 +37,7 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
         out.println(
             "time,elapsed_s,lat,lon,accuracy_m,gps_speed_mps,moving_speed_mps,remaining_m,remaining_s," +
                 "required_speed_mps,observed_state,state,state_changed,off_route,next_turn,next_turn_m," +
-                "source,rejected,used_lat,used_lon,offset_m,dest_m,steps,step_len_m",
+                "source,rejected,used_lat,used_lon,offset_m,dest_m,steps,step_len_m,cadence_spm,checkpoint_m",
         )
     }
 
@@ -68,6 +69,8 @@ class CsvLogger(context: Context, destinationName: String, private val startedAt
                 u.destinationDistanceM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
                 u.steps,
                 "%.2f".format(Locale.US, u.stepLengthM),
+                u.cadenceSpm?.let { "%.0f".format(Locale.US, it) }.orEmpty(),
+                u.checkpointRemainingM?.let { "%.1f".format(Locale.US, it) }.orEmpty(),
             ).joinToString(","),
         )
     }

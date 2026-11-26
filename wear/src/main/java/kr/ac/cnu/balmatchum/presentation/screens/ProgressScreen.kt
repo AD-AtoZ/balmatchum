@@ -62,6 +62,8 @@ private val Muted = Color(0xFFAEAEB2)
  * 안내 중 화면 (TODOLIST T5). 사용자가 손목을 들어 볼 때만 보는 화면이라 한눈에 상태가 보여야 한다.
  * 검은 바탕에 상태 색 하나만 쓴다: 가장자리 고리(경로를 얼마나 왔는지), 상태 글자, 방향 카드.
  * [update]가 null이면 아직 첫 위치를 받기 전이다.
+ *
+ * 실내 시연([indoor])에서는 체크포인트가 가까워지면 통과 버튼을 띄우고, 보폭을 잴 때 볼 걸음 수를 아래에 보여 준다.
  */
 @Composable
 fun ProgressScreen(
@@ -71,6 +73,8 @@ fun ProgressScreen(
     routeDistanceM: Double,
     nextTurn: UpcomingTurn? = null,
     onStop: () -> Unit,
+    indoor: Boolean = false,
+    onCheckpoint: () -> Unit = {},
 ) {
     val accent = update?.state?.color() ?: Muted
     // 안내 지점이 가까우면(30m 안) 방향 카드를 크게 키운다.
@@ -101,6 +105,9 @@ fun ProgressScreen(
                 )
             } else {
                 StateWord(update.state, accent, 32.sp)
+                if (indoor && update.checkpointConfirmable) {
+                    FilledTonalButton(onClick = onCheckpoint) { Text("장애물 통과", fontSize = 14.sp) }
+                }
                 if (update.state == ArrivalState.TOO_LATE) {
                     Text("뛰어도 ${Format.duration(update.lateAtRunSec)} 지각", color = accent, fontSize = 12.sp)
                 }
@@ -115,6 +122,15 @@ fun ProgressScreen(
                     fontSize = 11.sp,
                     textAlign = TextAlign.Center,
                 )
+                if (indoor) {
+                    Text(
+                        "걸음 ${update.steps} · 분당 ${update.cadenceSpm?.let { "%.0f".format(it) } ?: "—"}" +
+                            " · ${"%.2f".format(update.stepLengthM)}m",
+                        color = Muted,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
             // 끝내기는 가끔 쓰므로 첫 화면에서 빼고, 아래로 스크롤하면 나오게 한다.
             FilledTonalButton(onClick = onStop, modifier = Modifier.padding(top = 48.dp)) { Text("안내 끝내기", fontSize = 12.sp) }

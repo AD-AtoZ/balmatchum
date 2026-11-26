@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
                 speedStore = speedStore,
                 startGuidance = ::startGuidance,
                 stopGuidance = { GuidanceService.stop(this) },
+                confirmCheckpoint = { GuidanceService.checkpoint(this) },
             )
         }
     }
