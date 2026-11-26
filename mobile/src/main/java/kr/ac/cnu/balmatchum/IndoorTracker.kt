@@ -64,6 +64,8 @@ data class TrackerUpdate(
     val lastMatchAt: Long = 0,
     /** 마지막 지도 맞추기에 쓴 카메라 점을 지도 좌표로 옮긴 것(forward, lateral 순서로 이어 붙임). 미니맵에 그린다. */
     val seenPoints: FloatArray? = null,
+    /** 직전 위치 찾기가 실패했으면 true. 한 바퀴 더 돌라고 안내할 때 쓴다. */
+    val lastSearchFailed: Boolean = false,
 )
 
 /**
@@ -106,6 +108,9 @@ class IndoorTracker(
     @Volatile
     private var seenPoints: FloatArray? = null
 
+    @Volatile
+    private var lastSearchFailed = false
+
     /** 걷는 중 지도로 바로잡기를 할지. 끄면 처음 찾은 위치에서 카메라 이동량만 쓴다. */
     @Volatile
     var refineEnabled = true
@@ -118,6 +123,10 @@ class IndoorTracker(
 
     @Volatile
     private var scanResetRequested = false
+
+    /** 둘러본 각도만 비운다(모은 점은 둔다). 위치 찾기에 실패했을 때. */
+    @Volatile
+    private var coverageResetRequested = false
 
     @Volatile
     private var searchRequested = false
@@ -205,6 +214,7 @@ class IndoorTracker(
         if (matcher == null) return
         transform = null
         pendingResult = null
+        lastSearchFailed = false
         step = LocateStep.SCANNING
         scanResetRequested = true
     }
@@ -271,6 +281,10 @@ class IndoorTracker(
                 points.clear()
                 coverage.clear()
             }
+            if (coverageResetRequested) {
+                coverageResetRequested = false
+                coverage.clear()
+            }
             collectPoints(frame, now)
             if (step == LocateStep.SCANNING) {
                 coverage.add(viewX, viewZ)
@@ -310,6 +324,7 @@ class IndoorTracker(
         lastMatch = pendingResult ?: lastMatch,
         lastMatchAt = lastMatchAt,
         seenPoints = seenPoints,
+        lastSearchFailed = lastSearchFailed,
     )
 
     /** 이번 화면의 주변 점을 모은다. 오래된 점은 버린다(한 바퀴 돌기 중에는 모두 둔다). */
@@ -359,15 +374,20 @@ class IndoorTracker(
             matching = false
             when {
                 result == null || result.score < ACCEPT_SCORE -> {
-                    // 점이 모자라거나 잘 맞는 자리가 없다. 더 둘러보게 한다.
+                    // 점이 모자라거나 잘 맞는 자리가 없다. 모은 점은 두고, 한 바퀴를 새로 돌아야 다시 찾게 한다.
+                    // 둘러본 각도를 비우지 않으면 다음 화면에서 곧바로 다시 찾느라 무거운 계산이 계속 돈다.
                     lastMatch = result
+                    lastSearchFailed = true
+                    coverageResetRequested = true
                     step = LocateStep.SCANNING
                 }
                 result.ambiguous -> {
+                    lastSearchFailed = false
                     pendingResult = result
                     step = LocateStep.UNSURE
                 }
                 else -> {
+                    lastSearchFailed = false
                     lastMatch = result
                     lastMatchAt = now
                     transform = result.transform

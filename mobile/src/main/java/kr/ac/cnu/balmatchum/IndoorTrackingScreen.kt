@@ -111,7 +111,8 @@ fun IndoorTrackingScreen(modifier: Modifier = Modifier, onClose: () -> Unit) {
             if (wallMap == null) {
                 "복도 지도를 읽지 못했습니다. \"여기가 출발선\"으로 출발선을 손으로 정해 주세요."
             } else {
-                "출발선 근처에서 \"출발 위치 찾기\"를 누르고 제자리에서 천천히 한 바퀴 도세요. 카메라가 본 주변을 복도 스캔 지도와 비교해 위치를 찾습니다."
+                "① 출발선 근처에 서서 \"출발 위치 찾기\"를 누릅니다. ② 휴대폰을 가슴 높이에서 세워 들고, 제자리에서 천천히 한 바퀴 돕니다. " +
+                    "③ 다 돌면 카메라가 본 주변을 복도 스캔 지도와 비교해 자동으로 위치를 찾고, 오른쪽 아래 지도에 파란 점으로 보여 줍니다."
             },
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -175,7 +176,12 @@ private fun statusText(error: String?, hasCamera: Boolean, s: TrackerUpdate, wat
     error != null -> error
     !hasCamera -> "카메라 권한 필요"
     !s.tracking -> "주변을 인식하는 중… 휴대폰을 천천히 좌우로 움직여 주세요"
-    s.step == LocateStep.SCANNING -> "한 바퀴 도는 중: ${s.scanDegrees}° / 360° · 점 ${s.pointCount}개"
+    s.step == LocateStep.SCANNING && s.lastSearchFailed ->
+        "지도와 잘 맞는 자리를 못 찾았습니다. 문·게시판이 보이게 한 바퀴 더 천천히 돌아 주세요 (${s.scanDegrees}° / 360°)"
+    s.step == LocateStep.SCANNING && s.scanDegrees >= 300 && s.pointCount < 120 ->
+        "주변 점이 부족합니다(${s.pointCount}개). 문·게시판처럼 무늬 있는 곳을 비추며 천천히 더 돌아 주세요"
+    s.step == LocateStep.SCANNING ->
+        "제자리에서 천천히 한 바퀴 도세요: ${s.scanDegrees}° / 360° · 점 ${s.pointCount}개"
     s.step == LocateStep.SEARCHING -> "지도에서 위치를 찾는 중…"
     s.step == LocateStep.UNSURE -> "위치가 확실하지 않습니다. 다른 곳과 비슷하게 보입니다"
     s.pose == null -> "\"출발 위치 찾기\"를 누르세요"
