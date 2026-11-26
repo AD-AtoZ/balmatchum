@@ -18,6 +18,8 @@ data class GuidanceRequest(
     val simulatedSpeedMps: Double? = null,
     /** 실내 시연 설정. 값이 있으면 GPS 없이 걸음 수만으로 경로를 따라 진행시킨다. */
     val indoor: IndoorSettings? = null,
+    /** 실내 시연에서 위치를 휴대폰 카메라 추적으로 받는다. [indoor]와 함께 쓰지 않는다. */
+    val phoneTracking: Boolean = false,
 )
 
 /** 안내가 끝났을 때 결과 화면에 보여 줄 값. */

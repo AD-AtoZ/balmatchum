@@ -62,6 +62,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.play.services.wearable)
     implementation(libs.play.services.location)
+    // 실내 시연: 카메라로 이동을 추적한다(ARCore)
+    implementation(libs.arcore)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

@@ -21,13 +21,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kr.ac.cnu.balmatchum.core.ArrivalCoach
+import kr.ac.cnu.balmatchum.core.CoachConfig
 import kr.ac.cnu.balmatchum.core.CoachUpdate
+import kr.ac.cnu.balmatchum.core.IndoorDemo
 import kr.ac.cnu.balmatchum.core.LocationSample
 import kr.ac.cnu.balmatchum.core.TurnAlertTracker
 import kr.ac.cnu.balmatchum.core.TurnGuide
 import kr.ac.cnu.balmatchum.haptics.Haptics
 import kr.ac.cnu.balmatchum.location.FusedLocationSource
 import kr.ac.cnu.balmatchum.location.LocationSource
+import kr.ac.cnu.balmatchum.location.PhoneLocationSource
 import kr.ac.cnu.balmatchum.location.ReplayLocationSource
 import kr.ac.cnu.balmatchum.location.StepSource
 import kr.ac.cnu.balmatchum.log.CsvLogger
@@ -44,6 +47,9 @@ import kr.ac.cnu.balmatchum.presentation.MainActivity
  *
  * 실내 시연([GuidanceRequest.indoor])에서는 위치를 아예 받지 않고 걸음 센서만 켜서
  * 1초마다 [ArrivalCoach.updateIndoor]로 판정한다.
+ *
+ * 휴대폰 카메라 추적([GuidanceRequest.phoneTracking])에서는 휴대폰이 보내 주는 위치를 GPS 자리에 끼운다.
+ * 나머지는 실외와 같고, 복도가 짧으므로 도착 반경만 줄인다.
  */
 class GuidanceService : Service() {
 
@@ -82,7 +88,12 @@ class GuidanceService : Service() {
 
         val startedAt = System.currentTimeMillis()
         val route = request.destination.tmap.route
-        coach = ArrivalCoach(route, request.deadlineMillis, request.speeds, indoor = request.indoor)
+        val config = if (request.phoneTracking) {
+            CoachConfig(arrivalRadiusM = IndoorDemo.settings.arrivalRadiusM)
+        } else {
+            CoachConfig()
+        }
+        coach = ArrivalCoach(route, request.deadlineMillis, request.speeds, config, indoor = request.indoor)
         turnGuide = TurnGuide(request.destination.tmap.turns, route.totalDistance)
         turnAlerts = TurnAlertTracker()
         logger = CsvLogger(this, request.destination.name, startedAt)
@@ -94,7 +105,11 @@ class GuidanceService : Service() {
             beginIndoor(request, startedAt, haptics)
             return
         }
-        source = request.simulatedSpeedMps?.let { ReplayLocationSource(route, it, scope) } ?: FusedLocationSource(this)
+        source = when {
+            request.phoneTracking -> PhoneLocationSource(this)
+            request.simulatedSpeedMps != null -> ReplayLocationSource(route, request.simulatedSpeedMps, scope)
+            else -> FusedLocationSource(this)
+        }
         source?.start { sample -> onSample(sample, request, startedAt, haptics) }
         if (request.simulatedSpeedMps == null) {
             steps = StepSource(this).also { s -> s.start { n -> coach?.onStep(n) } }
