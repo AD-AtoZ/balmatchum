@@ -8,8 +8,9 @@
 
 스캔의 구멍 메우기
 - 벽: 벽 높이(0.4~2.0m)의 점이 있는 칸을 벽으로 보고, 30cm 이하의 틈은 이어 붙인다(모폴로지 닫기).
-- 안쪽 공간: 바닥 점이 찍힌 칸과 벽 칸을 합쳐 50cm 이하의 틈을 잇고, 사방이 막힌 구멍을 채운다.
-  바닥이 번들거리거나 가려져 스캔이 비어 있던 곳도 건물 안으로 본다.
+- 가상 벽: 스캔에 아무것도 찍히지 않아 벽이 끊긴 곳은 VIRTUAL_WALLS 선분으로 닫는다(지도 맞추기에도 벽으로 쓴다).
+- 안쪽 공간: 바닥 점이 찍힌 칸, 천장 점이 찍힌 칸(위에 천장이 있으면 건물 안), 벽 칸을 합쳐 50cm 이하의 틈을 잇고,
+  사방이 막힌 구멍을 채운다. 바닥이 번들거리거나 가려져 스캔이 비어 있던 곳도 천장이 찍혔으면 건물 안으로 본다.
 - 경로 복도: 경로(lateral 0) 줄마다 좌우로 벽을 찾아 그 사이를 안쪽 공간으로 본다. 한쪽 벽이 없는
   교차로·출입구는 다른 줄에서 잰 복도 반폭(중앙값)을 쓴다. 바닥 스캔이 비어 있어도 경로는 끊기지 않는다.
   경로 중심선 좌우 40cm는 벽으로 찍혀 있어도(출발선 문틀 등) 항상 걸을 수 있는 곳으로 둔다.
@@ -36,12 +37,23 @@ FORWARD_RANGE = (-6.0, 62.0)
 LATERAL_RANGE = (-13.0, 13.0)
 WALL_HEIGHT = (0.4, 2.0)      # 바닥에서 이 높이 사이의 점을 벽으로 본다(바닥·천장 제외)
 FLOOR_HEIGHT = (-0.15, 0.15)  # 바닥 점
+CEILING_MIN = 2.3             # 이보다 높은 점은 천장으로 본다(벽 높이 범위 위)
+
+# 스캔에 벽이 찍히지 않은 곳을 닫는 가상 벽 (forward, lateral) → (forward, lateral), 좌우 뒤집은 좌표 기준.
+# 교차로 왼쪽(앞으로 43.7~48.0m): 양쪽 벽 끝(lateral 약 -1.45m)을 잇는다. 바깥에 천장·바닥 점이 거의 없다.
+# 출발선 뒤(앞으로 -1.9m): 스캔이 -1.8m에서 끝나 복도 뒤가 트여 있다. 양쪽 벽(lateral -1.5 ~ +0.7m)을 가로로 막는다.
+VIRTUAL_WALLS = [
+    ((43.4, -1.45), (48.3, -1.45)),
+    ((-1.9, -1.6), (-1.9, 0.8)),
+]
+VIRTUAL_WALL_HALF_CELLS = 1   # 가상 벽 두께 = 3칸(30cm)
 MIN_WALL_POINTS = 2
 WALL_GAP_CELLS = 3            # 벽 틈 잇기 (약 30cm)
 INSIDE_GAP_CELLS = 5          # 안쪽 공간 틈 잇기 (약 50cm)
 WALL_MARGIN_CELLS = 2         # 벽에서 이만큼은 걸을 수 없는 곳으로 둔다 (20cm)
 CORRIDOR_SEARCH_M = 3.0       # 경로 중심선에서 좌우 벽을 찾는 최대 거리
-ROUTE_MARGIN_M = 2.0          # 경로 앞뒤로 복도를 더 이어 두는 길이
+ROUTE_MARGIN_M = 2.0          # 도착선 뒤로 복도를 더 이어 두는 길이
+ROUTE_BACK_M = 1.6            # 출발선 뒤로 복도를 이어 두는 길이 (출발선 뒤 가상 벽 앞까지)
 ROUTE_CORE_M = 0.4            # 경로 중심선 좌우 이 폭은 벽으로 찍혀 있어도 항상 걸을 수 있다
 
 
@@ -50,17 +62,31 @@ def route_core(nf, nl):
     band = np.zeros((nl, nf), bool)
     zero_l = int(round(-LATERAL_RANGE[0] / CELL_M))
     half = int(round(ROUTE_CORE_M / CELL_M))
-    f0 = max(int(round((-ROUTE_MARGIN_M - FORWARD_RANGE[0]) / CELL_M)), 0)
+    f0 = max(int(round((-ROUTE_BACK_M - FORWARD_RANGE[0]) / CELL_M)), 0)
     f1 = min(int(round((ROUTE_LENGTH_M + ROUTE_MARGIN_M - FORWARD_RANGE[0]) / CELL_M)), nf)
     band[zero_l - half: zero_l + half + 1, f0:f1] = True
     return band
+
+
+def virtual_walls(nf, nl, mirror):
+    g = np.zeros((nl, nf), bool)
+    if not mirror:  # 가상 벽 좌표는 좌우 뒤집은 지도 기준
+        return g
+    for (f0, l0), (f1, l1) in VIRTUAL_WALLS:
+        n = int(max(abs(f1 - f0), abs(l1 - l0)) / CELL_M * 2) + 1
+        for t in np.linspace(0.0, 1.0, n):
+            fi = int(np.floor((f0 + (f1 - f0) * t - FORWARD_RANGE[0]) / CELL_M))
+            li = int(np.floor((l0 + (l1 - l0) * t - LATERAL_RANGE[0]) / CELL_M))
+            h = VIRTUAL_WALL_HALF_CELLS
+            g[max(li - h, 0):li + h + 1, max(fi - h, 0):fi + h + 1] = True
+    return g
 
 
 def corridor_band(wall, nf, nl):
     """경로 중심선 좌우 벽 사이 칸. 벽을 못 찾은 쪽은 다른 줄의 반폭 중앙값을 쓴다."""
     zero_l = int(round(-LATERAL_RANGE[0] / CELL_M))
     reach = int(round(CORRIDOR_SEARCH_M / CELL_M))
-    f0 = int(round((-ROUTE_MARGIN_M - FORWARD_RANGE[0]) / CELL_M))
+    f0 = int(round((-ROUTE_BACK_M - FORWARD_RANGE[0]) / CELL_M))
     f1 = int(round((ROUTE_LENGTH_M + ROUTE_MARGIN_M - FORWARD_RANGE[0]) / CELL_M))
     sides = {}
     for c in range(max(f0, 0), min(f1, nf)):
@@ -102,9 +128,11 @@ def build(src, mirror=True):
 
     wall_raw = count((zc >= WALL_HEIGHT[0]) & (zc <= WALL_HEIGHT[1])) >= MIN_WALL_POINTS
     floor_raw = count((zc >= FLOOR_HEIGHT[0]) & (zc <= FLOOR_HEIGHT[1])) > 0
+    ceiling_raw = count(zc >= CEILING_MIN) > 0
 
-    wall = ndimage.binary_closing(wall_raw, structure=disk(WALL_GAP_CELLS)) | wall_raw
-    inside = ndimage.binary_closing(floor_raw | wall, structure=disk(INSIDE_GAP_CELLS)) | floor_raw | wall
+    wall = ndimage.binary_closing(wall_raw, structure=disk(WALL_GAP_CELLS)) | wall_raw | virtual_walls(nf, nl, mirror)
+    seen = floor_raw | ceiling_raw | wall
+    inside = ndimage.binary_closing(seen, structure=disk(INSIDE_GAP_CELLS)) | seen
     inside = ndimage.binary_fill_holes(inside) | corridor_band(wall, nf, nl)
     walkable = inside & ~ndimage.binary_dilation(wall, structure=disk(WALL_MARGIN_CELLS))
     walkable |= route_core(nf, nl)
@@ -119,9 +147,9 @@ def build(src, mirror=True):
     distance = np.minimum(np.round(ndimage.distance_transform_edt(~wall)), 255).astype(np.uint8)
     stats = {
         "wall_raw": int(wall_raw.sum()), "wall": int(wall.sum()),
-        "floor_raw": int(floor_raw.sum()), "walkable": int(walkable.sum()),
+        "floor_raw": int(floor_raw.sum()), "ceiling_raw": int(ceiling_raw.sum()), "walkable": int(walkable.sum()),
     }
-    return nf, nl, distance, walkable.astype(np.uint8), wall_raw, wall, floor_raw, stats
+    return nf, nl, distance, walkable.astype(np.uint8), wall_raw, wall, floor_raw | ceiling_raw, stats
 
 
 def main(src, out, mirror=True, png=None):
@@ -137,7 +165,7 @@ def main(src, out, mirror=True, png=None):
         from PIL import Image
         img = np.full((nl, nf, 3), 255, np.uint8)
         img[walkable == 1] = (190, 225, 190)                 # 걸을 수 있는 곳
-        img[floor_raw & (walkable == 1)] = (150, 205, 150)    # 그중 바닥이 실제로 찍힌 곳
+        img[floor_raw & (walkable == 1)] = (150, 205, 150)    # 그중 바닥·천장이 실제로 찍힌 곳
         img[wall & ~wall_raw] = (230, 120, 40)                # 메운 벽 틈
         img[wall_raw] = (30, 30, 30)                          # 원래 벽
         Image.fromarray(img).transpose(Image.ROTATE_90).resize((nl * 2, nf * 2), Image.NEAREST).save(png)
