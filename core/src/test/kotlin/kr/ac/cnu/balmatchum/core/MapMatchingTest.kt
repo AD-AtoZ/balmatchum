@@ -209,6 +209,66 @@ class MapMatchingTest {
     }
 
     @Test
+    fun walkableAreaCoversTheRouteOnly() {
+        assertTrue(map.hasWalkable)
+        // 경로 0~55m 중심선은 전부 걸을 수 있다(바닥 스캔이 빈 교차로 포함).
+        var f = 0.0
+        while (f <= 55.0) {
+            assertTrue("$f m 중심선", map.isWalkable(f, 0.0))
+            f += 0.5
+        }
+        // 복도 옆 스캔 밖, 지도 밖은 걸을 수 없다.
+        assertTrue(!map.isWalkable(20.0, 10.0))
+        assertTrue(!map.isWalkable(-100.0, 0.0))
+        // 밖에 찍힌 자리는 가까운 복도 안으로 당겨진다.
+        val (nf, nl) = map.nearestWalkable(20.0, 3.0, 3.0)!!
+        assertTrue(map.isWalkable(nf, nl))
+        assertTrue(abs(nf - 20.0) < 0.5 && nl < 3.0)
+    }
+
+    @Test
+    fun constrainKeepsTheCameraInside() {
+        val m = MapMatcher(map)
+        val outside = MapTransform.placing(1.0, 2.0, 20.0, 4.0, Math.toRadians(30.0))
+        val fixed = m.constrain(outside, 1.0, 2.0)
+        assertTrue(map.isWalkable(fixed.forward(1.0, 2.0), fixed.lateral(1.0, 2.0)))
+        assertEquals(outside.thetaRad, fixed.thetaRad, 1e-12)
+        // 이미 안이면 그대로
+        val inside = MapTransform.placing(1.0, 2.0, 20.0, 0.0, 0.0)
+        assertEquals(inside, m.constrain(inside, 1.0, 2.0))
+    }
+
+    @Test
+    fun fixedStartTrackingStaysOnTheRoute() {
+        // 출발선에서 시작해 걷는다. 카메라 추적은 거리를 6% 길게 재고 옆으로 조금씩 휜다(흔한 오차를 과장).
+        // 지도 맞추기로 1초마다 바로잡고 걸을 수 있는 곳 안으로 묶으면, 바로잡지 않을 때보다 오차가 작아야 한다.
+        val m = MapMatcher(map)
+        var est = MapTransform.placing(0.0, 0.0, 0.0, 0.0, 0.0)
+        val raw = est
+        var worstFixed = 0.0
+        var worstRaw = 0.0
+        var f = 0.0
+        var seed = 100
+        while (f <= 54.0) {
+            val camX = f * 1.06
+            val camZ = 0.015 * f
+            val theta = -Math.toDegrees(kotlin.math.atan2(0.015, 1.06))
+            val truth = Truth(f = f, l = 0.0, thetaDeg = theta, camX = camX, camZ = camZ)
+            val pts = cameraPoints(truth, rangeM = 8.0, fromDeg = -70.0, toDeg = 70.0, seed = seed++)
+            m.refine(pts, est, camX, camZ)?.let { est = est.blend(it.transform, 0.5) }
+            est = m.constrain(est, camX, camZ)
+            val e = hypot(est.forward(camX, camZ) - f, est.lateral(camX, camZ))
+            val r = hypot(raw.forward(camX, camZ) - f, raw.lateral(camX, camZ))
+            worstFixed = maxOf(worstFixed, e)
+            worstRaw = maxOf(worstRaw, r)
+            assertTrue(map.isWalkable(est.forward(camX, camZ), est.lateral(camX, camZ)))
+            f += 1.5
+        }
+        println("고정 출발 추적: 바로잡음 최대 오차 ${"%.2f".format(worstFixed)}m, 안 바로잡음 ${"%.2f".format(worstRaw)}m")
+        assertTrue("바로잡음 $worstFixed / 안 바로잡음 $worstRaw", worstFixed < worstRaw)
+    }
+
+    @Test
     fun turnCoverageCountsDirections() {
         val turn = TurnCoverage()
         for (deg in 0 until 360 step 10) turn.add(cos(Math.toRadians(deg.toDouble())), sin(Math.toRadians(deg.toDouble())))

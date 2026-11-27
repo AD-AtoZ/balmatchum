@@ -62,10 +62,20 @@ data class TrackerUpdate(
     val lastMatch: MatchResult? = null,
     /** 마지막으로 지도 맞추기에 성공한 시각(ms). */
     val lastMatchAt: Long = 0,
-    /** 마지막 지도 맞추기에 쓴 카메라 점을 지도 좌표로 옮긴 것(forward, lateral 순서로 이어 붙임). 미니맵에 그린다. */
+    /**
+     * 마지막 지도 맞추기에 쓴 카메라 점을 지도 좌표로 옮긴 것. 점마다 (forward, lateral, 가장 가까운 벽까지 거리 m) 3개씩 이어 붙임.
+     * 벽까지 거리가 짧을수록 스캔 지도와 맞은 점이다. 미니맵에 그린다.
+     */
     val seenPoints: FloatArray? = null,
     /** 직전 위치 찾기가 실패했으면 true. 한 바퀴 더 돌라고 안내할 때 쓴다. */
     val lastSearchFailed: Boolean = false,
+    /** 출발점(지도 좌표). 워치로는 여기서부터 간 거리를 보낸다. */
+    val startF: Double = 0.0,
+    val startL: Double = 0.0,
+    /** 지금까지 지나온 자리(forward, lateral 순서로 이어 붙임). 미니맵에 선으로 그린다. */
+    val trail: FloatArray? = null,
+    /** 걸을 수 있는 곳 밖으로 나가 안으로 당겨 온 횟수(출발 후). */
+    val snaps: Int = 0,
 )
 
 /**
@@ -73,9 +83,12 @@ data class TrackerUpdate(
  *
  * 1. ARCore가 카메라 영상과 움직임 센서로 휴대폰이 얼마나, 어느 쪽으로 움직였는지 추적하고, 여러 장의 사진에서
  *    벽 모서리·무늬 같은 주변 지점의 3차원 위치(점)를 계산한다.
- * 2. 처음에 제자리에서 한 바퀴 돌며 모은 점을 스캔 벽 지도([WallMap]) 전체에 대 보고, 가장 잘 겹치는 자리를 찾는다([MapMatcher.localize]).
- * 3. 걷는 동안 1초마다 최근 점을 지도 근처에 다시 대 보고, 추적이 틀어진 만큼 조금씩 바로잡는다([MapMatcher.refine]).
- * 4. 지도 기준 위치를 [IndoorPose]로 [onUpdate]에 알려 준다. 워치로 보내는 일은 화면이 한다.
+ * 2. 정해 둔 출발점에 서서 복도 앞쪽을 비추고 [startHere]를 부르면, 그 자리·방향을 지도의 출발점에 맞춘다.
+ * 3. 걷는 동안에는 카메라 이동량으로 위치를 따라가고, 1초마다 최근 점을 지도 근처에 대 보고 틀어진 만큼 조금씩 바로잡는다([MapMatcher.refine]).
+ * 4. 위치가 스캔된 건물 안(걸을 수 있는 곳) 밖으로 나가면 가장 가까운 안쪽 자리로 당겨 온다([MapMatcher.constrain]).
+ * 5. 지도 기준 위치를 [IndoorPose]로 [onUpdate]에 알려 준다. 워치로 보내는 일은 화면이 한다.
+ *
+ * 예비 방법: 출발점을 모를 때는 제자리에서 한 바퀴 돌며 모은 점으로 지도 전체를 찾는다([startScan], 실험 기능).
  *
  * ARCore는 화면을 그리는 스레드에서만 갱신할 수 있어서 [GLSurfaceView.Renderer]로 만든다.
  * 지도 맞추기는 무거워서 별도 스레드에서 하고, [onUpdate]는 그리기 스레드에서 불린다.
@@ -115,8 +128,28 @@ class IndoorTracker(
     @Volatile
     var refineEnabled = true
 
+    /** 출발 요청: 이 지도 좌표(forward, lateral)를 출발점으로 삼는다. 카메라가 앞을 볼 때 처리한다. */
     @Volatile
-    private var markStartRequested = false
+    private var startRequest: Pair<Double, Double>? = null
+
+    @Volatile
+    private var startF = 0.0
+
+    @Volatile
+    private var startL = 0.0
+
+    /** 사용자가 위치를 새로 정할 때마다 늘린다. 그 전에 시작한 지도 맞추기 결과는 버린다. */
+    @Volatile
+    private var transformVersion = 0
+
+    @Volatile
+    private var trailSnapshot: FloatArray? = null
+
+    @Volatile
+    private var snaps = 0
+
+    @Volatile
+    private var trailResetRequested = false
 
     @Volatile
     private var matching = false
@@ -139,6 +172,8 @@ class IndoorTracker(
     private val points = HashMap<Int, StoredPoint>()
     private var lastPointCloudTime = 0L
     private var lastRefineAt = 0L
+    private val trail = ArrayList<Float>()
+    private var lastTrailAt = 0L
 
     private var installRequested = false
     private var surface: GLSurfaceView? = null
@@ -209,9 +244,10 @@ class IndoorTracker(
         worker.shutdownNow()
     }
 
-    /** 제자리에서 한 바퀴 돌며 출발 위치 찾기를 시작한다. 지도가 없으면 아무것도 하지 않는다. */
+    /** (실험) 제자리에서 한 바퀴 돌며 지도 전체에서 위치 찾기를 시작한다. 지도가 없으면 아무것도 하지 않는다. */
     fun startScan() {
         if (matcher == null) return
+        transformVersion++
         transform = null
         pendingResult = null
         lastSearchFailed = false
@@ -227,14 +263,26 @@ class IndoorTracker(
     /** 헷갈린다고 나온 후보를 그래도 쓴다. */
     fun acceptPending() {
         val result = pendingResult ?: return
+        transformVersion++
         transform = result.transform
         pendingResult = null
+        clearTrail()
         step = LocateStep.LOCATED
     }
 
-    /** 지금 서 있는 곳과 바라보는 방향을 출발선(앞으로 0m, 옆으로 0m)으로 삼는다. 지도 없이도 쓸 수 있는 예비 방법. */
-    fun markStart() {
-        markStartRequested = true
+    /**
+     * 지금 서 있는 곳을 지도의 ([forward], [lateral])로, 바라보는 방향을 복도 앞쪽으로 삼고 추적을 시작한다.
+     * 기본은 시연 출발선(0, 0). 지도가 없어도 쓸 수 있다(그때는 카메라 이동량만 쓴다).
+     */
+    fun startHere(forward: Double = 0.0, lateral: Double = 0.0) {
+        startRequest = forward to lateral
+    }
+
+    /** 지나온 길을 비운다. 여러 스레드에서 불려서, 실제로 비우는 일은 그리기 스레드가 한다. */
+    private fun clearTrail() {
+        trailResetRequested = true
+        trailSnapshot = null
+        snaps = 0
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -293,12 +341,28 @@ class IndoorTracker(
                     startLocalize(camX, camY, camZ, now)
                 }
             }
-            if (markStartRequested && canAlign) {
-                markStartRequested = false
-                // 바라보는 방향이 지도의 앞쪽(forward)이 되도록 돌리고, 지금 자리를 출발선으로 놓는다.
-                transform = MapTransform.placing(camX, camZ, 0.0, 0.0, -atan2(viewZ, viewX))
+            val request = startRequest
+            if (request != null && canAlign) {
+                startRequest = null
+                // 바라보는 방향이 지도의 앞쪽(forward)이 되도록 돌리고, 지금 자리를 출발점에 놓는다.
+                transformVersion++
+                transform = MapTransform.placing(camX, camZ, request.first, request.second, -atan2(viewZ, viewX))
+                startF = request.first
+                startL = request.second
                 pendingResult = null
+                lastSearchFailed = false
+                clearTrail()
+                lastRefineAt = now // 출발 직후 1초는 카메라 이동량만 쓴다
                 step = LocateStep.LOCATED
+            }
+            // 걸을 수 있는 곳 밖으로 나가면 안으로 당겨 온다(대부분 칸 하나만 보는 가벼운 계산).
+            val placed = transform
+            if (step == LocateStep.LOCATED && placed != null && matcher != null) {
+                val kept = matcher.constrain(placed, camX, camZ)
+                if (kept !== placed) {
+                    transform = kept
+                    snaps++
+                }
             }
             if (step == LocateStep.LOCATED && refineEnabled && matcher != null && !matching &&
                 now - lastRefineAt >= REFINE_INTERVAL_MILLIS
@@ -308,7 +372,9 @@ class IndoorTracker(
             }
 
             val t = transform
-            onUpdate(status(tracking = true, pose = t?.toPose(camX, camZ, viewX, viewZ, now), canAlign = canAlign))
+            val pose = t?.toPose(camX, camZ, viewX, viewZ, now)
+            if (pose != null && step == LocateStep.LOCATED) addTrail(pose, now)
+            onUpdate(status(tracking = true, pose = pose, canAlign = canAlign))
         } catch (e: Exception) {
             // 화면이 꺼지는 순간 등 카메라를 잠깐 쓸 수 없을 때. 다음 화면에서 다시 시도한다.
         }
@@ -325,7 +391,27 @@ class IndoorTracker(
         lastMatchAt = lastMatchAt,
         seenPoints = seenPoints,
         lastSearchFailed = lastSearchFailed,
+        startF = startF,
+        startL = startL,
+        trail = trailSnapshot,
+        snaps = snaps,
     )
+
+    /** 지나온 자리를 0.5초마다, 20cm 넘게 움직였을 때만 남긴다. */
+    private fun addTrail(pose: IndoorPose, now: Long) {
+        if (trailResetRequested) {
+            trailResetRequested = false
+            trail.clear()
+        }
+        if (now - lastTrailAt < TRAIL_INTERVAL_MILLIS) return
+        lastTrailAt = now
+        val n = trail.size
+        if (n >= 2 && hypot(trail[n - 2] - pose.forwardM, trail[n - 1] - pose.lateralM) < TRAIL_MIN_STEP_M) return
+        trail += pose.forwardM.toFloat()
+        trail += pose.lateralM.toFloat()
+        if (trail.size > MAX_TRAIL * 2) trail.subList(0, 2).clear()
+        trailSnapshot = trail.toFloatArray()
+    }
 
     /** 이번 화면의 주변 점을 모은다. 오래된 점은 버린다(한 바퀴 돌기 중에는 모두 둔다). */
     private fun collectPoints(frame: Frame, now: Long) {
@@ -368,10 +454,12 @@ class IndoorTracker(
         val pts = snapshot(camX, camY, camZ)
         step = LocateStep.SEARCHING
         matching = true
+        val version = transformVersion
         worker.execute {
             val result = runCatching { m.localize(pts, camX, camZ) }.getOrNull()
-            if (result != null) seenPoints = toMap(pts, result.transform)
             matching = false
+            if (version != transformVersion) return@execute // 그사이 사용자가 출발점을 정했다
+            if (result != null) seenPoints = toMap(pts, result.transform)
             when {
                 result == null || result.score < ACCEPT_SCORE -> {
                     // 점이 모자라거나 잘 맞는 자리가 없다. 모은 점은 두고, 한 바퀴를 새로 돌아야 다시 찾게 한다.
@@ -390,7 +478,9 @@ class IndoorTracker(
                     lastSearchFailed = false
                     lastMatch = result
                     lastMatchAt = now
+                    transformVersion++
                     transform = result.transform
+                    clearTrail()
                     step = LocateStep.LOCATED
                 }
             }
@@ -402,37 +492,50 @@ class IndoorTracker(
         val current = transform ?: return
         val pts = snapshot(camX, camY, camZ)
         matching = true
+        val version = transformVersion
         worker.execute {
             val result = runCatching { m.refine(pts, current, camX, camZ) }.getOrNull()
             matching = false
+            if (version != transformVersion || step != LocateStep.LOCATED) return@execute // 그사이 출발점을 새로 정했다
+            // 맞추지 못했어도 지금 점이 지도 어디에 놓이는지는 보여 준다(노란 점이 적으면 맞추기가 안 되는 것).
+            seenPoints = toMap(pts, result?.transform ?: current)
             if (result != null) {
-                seenPoints = toMap(pts, result.transform)
                 lastMatch = result
                 lastMatchAt = now
-                // 그사이 사용자가 다시 찾기를 눌렀으면 덮어쓰지 않는다. 한 번에 튀지 않게 절반만 옮긴다.
-                if (step == LocateStep.LOCATED && transform === current) {
-                    transform = current.blend(result.transform, REFINE_WEIGHT)
-                }
+                // 한 번에 튀지 않게 절반만 옮긴다. 그사이 바뀐 지금 변환(밖으로 나가 당겨 온 것 등)에 섞는다.
+                val latest = transform ?: return@execute
+                transform = m.constrain(latest.blend(result.transform, REFINE_WEIGHT), camX, camZ)
             }
         }
     }
 
-    /** 추적 좌표의 점(x, z)을 지도 좌표(forward, lateral)로 옮긴다. 미니맵에 많이 그리지 않게 [MAX_SHOWN_POINTS]개까지만. */
+    /**
+     * 추적 좌표의 점(x, z)을 지도 좌표로 옮기고, 가장 가까운 벽까지 거리도 붙인다(forward, lateral, 거리 순서).
+     * 미니맵에 많이 그리지 않게 [MAX_SHOWN_POINTS]개까지만.
+     */
     private fun toMap(xz: DoubleArray, t: MapTransform): FloatArray {
-        val n = minOf(xz.size / 2, MAX_SHOWN_POINTS)
-        val stride = maxOf(1, (xz.size / 2) / n)
-        return FloatArray(n * 2).also { out ->
+        val total = xz.size / 2
+        if (total == 0) return FloatArray(0)
+        val n = minOf(total, MAX_SHOWN_POINTS)
+        val stride = maxOf(1, total / n)
+        return FloatArray(n * 3).also { out ->
             for (i in 0 until n) {
                 val x = xz[2 * i * stride]
                 val z = xz[2 * i * stride + 1]
-                out[2 * i] = t.forward(x, z).toFloat()
-                out[2 * i + 1] = t.lateral(x, z).toFloat()
+                val f = t.forward(x, z)
+                val l = t.lateral(x, z)
+                out[3 * i] = f.toFloat()
+                out[3 * i + 1] = l.toFloat()
+                out[3 * i + 2] = (wallMap?.distanceToWallM(f, l) ?: WallMap.OUTSIDE_M).toFloat()
             }
         }
     }
 
     private companion object {
         const val MAX_SHOWN_POINTS = 300
+        const val TRAIL_INTERVAL_MILLIS = 500L
+        const val TRAIL_MIN_STEP_M = 0.2
+        const val MAX_TRAIL = 300
 
         /** ARCore 점의 확신도(0~1)가 이보다 낮으면 버린다. */
         const val MIN_CONFIDENCE = 0.2f

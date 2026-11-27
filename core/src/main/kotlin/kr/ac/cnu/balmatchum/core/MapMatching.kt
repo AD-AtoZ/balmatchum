@@ -12,9 +12,12 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * 스캔으로 만든 벽 지도. 칸마다 "가장 가까운 벽까지 거리(칸 수)"가 들어 있다.
+ * 스캔으로 만든 벽 지도. 칸마다 "가장 가까운 벽까지 거리(칸 수)"와 "걸을 수 있는 곳인지"가 들어 있다.
  * 만드는 쪽은 `tools/build_w5_wallmap.py`이고, 좌표는 실내 시연 경로 기준이다:
  * forward = 출발선에서 복도 방향으로 간 거리(m), lateral = 중심선에서 오른쪽으로 벗어난 거리(m).
+ *
+ * 걸을 수 있는 곳은 스캔된 건물 안쪽(바닥이 찍힌 곳 + 메운 구멍 + 경로 복도)에서 벽 근처를 뺀, 경로와 이어진 영역이다.
+ * [walkable]이 없으면(옛 BWM1 파일) 지도 안의 벽이 아닌 칸을 모두 걸을 수 있다고 본다.
  */
 class WallMap(
     val forwardCells: Int,
@@ -23,10 +26,14 @@ class WallMap(
     val forwardMin: Double,
     val lateralMin: Double,
     private val distance: ByteArray,
+    private val walkable: ByteArray? = null,
 ) {
     init {
         require(distance.size == forwardCells * lateralCells) { "벽 지도 크기가 맞지 않는다" }
+        require(walkable == null || walkable.size == distance.size) { "걸을 수 있는 곳 지도 크기가 맞지 않는다" }
     }
+
+    val hasWalkable: Boolean get() = walkable != null
 
     /** 그 자리에서 가장 가까운 벽까지 거리(m). 지도 밖이면 [OUTSIDE_M]. */
     fun distanceToWallM(forward: Double, lateral: Double): Double {
@@ -39,24 +46,62 @@ class WallMap(
     /** 칸([fi], [li])에서 가장 가까운 벽까지 거리(칸 수, 0~255). 미니맵을 그릴 때 쓴다. */
     fun cellDistance(fi: Int, li: Int): Int = distance[li * forwardCells + fi].toInt() and 0xFF
 
+    /** 칸([fi], [li])이 걸을 수 있는 곳인지. 지도 밖이면 false. */
+    fun cellWalkable(fi: Int, li: Int): Boolean {
+        if (fi < 0 || fi >= forwardCells || li < 0 || li >= lateralCells) return false
+        val k = li * forwardCells + fi
+        return if (walkable != null) walkable[k].toInt() != 0 else distance[k].toInt() != 0
+    }
+
+    /** 그 자리가 걸을 수 있는 곳인지. */
+    fun isWalkable(forward: Double, lateral: Double): Boolean =
+        cellWalkable(floor((forward - forwardMin) / cellM).toInt(), floor((lateral - lateralMin) / cellM).toInt())
+
+    /**
+     * 그 자리에서 [maxM] 안의 가장 가까운 걸을 수 있는 칸의 가운데 (forward, lateral). 이미 걸을 수 있으면 그 자리 그대로.
+     * 찾지 못하면 null.
+     */
+    fun nearestWalkable(forward: Double, lateral: Double, maxM: Double): Pair<Double, Double>? {
+        if (isWalkable(forward, lateral)) return forward to lateral
+        val fi0 = floor((forward - forwardMin) / cellM).toInt()
+        val li0 = floor((lateral - lateralMin) / cellM).toInt()
+        val reach = (maxM / cellM).toInt()
+        var best: Pair<Double, Double>? = null
+        var bestD = Double.MAX_VALUE
+        for (r in 1..reach) {
+            // r칸 고리만 본다. 고리 안에서 가장 가까운 칸을 찾으면, 다음 고리는 그보다 가까울 수 없을 때까지만 더 본다.
+            if (best != null && (r - 1) * cellM > bestD) break
+            for (dl in -r..r) for (df in -r..r) {
+                if (maxOf(abs(dl), abs(df)) != r) continue
+                if (!cellWalkable(fi0 + df, li0 + dl)) continue
+                val cf = forwardMin + (fi0 + df + 0.5) * cellM
+                val cl = lateralMin + (li0 + dl + 0.5) * cellM
+                val d = hypot(cf - forward, cl - lateral)
+                if (d <= maxM && d < bestD) { bestD = d; best = cf to cl }
+            }
+        }
+        return best
+    }
+
     val forwardMax: Double get() = forwardMin + forwardCells * cellM
     val lateralMax: Double get() = lateralMin + lateralCells * cellM
 
     companion object {
         const val OUTSIDE_M = 1e9
 
-        /** `tools/build_w5_wallmap.py`가 만든 파일을 읽는다. */
+        /** `tools/build_w5_wallmap.py`가 만든 파일(BWM1: 벽 거리만, BWM2: 벽 거리 + 걸을 수 있는 곳)을 읽는다. */
         fun parse(bytes: ByteArray): WallMap {
             val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            val magic = ByteArray(4).also { buffer.get(it) }
-            require(String(magic, Charsets.US_ASCII) == "BWM1") { "벽 지도 파일이 아니다" }
+            val magic = String(ByteArray(4).also { buffer.get(it) }, Charsets.US_ASCII)
+            require(magic == "BWM1" || magic == "BWM2") { "벽 지도 파일이 아니다" }
             val forwardCells = buffer.int
             val lateralCells = buffer.int
             val cell = buffer.float.toDouble()
             val forwardMin = buffer.float.toDouble()
             val lateralMin = buffer.float.toDouble()
             val distance = ByteArray(forwardCells * lateralCells).also { buffer.get(it) }
-            return WallMap(forwardCells, lateralCells, cell, forwardMin, lateralMin, distance)
+            val walkable = if (magic == "BWM2") ByteArray(forwardCells * lateralCells).also { buffer.get(it) } else null
+            return WallMap(forwardCells, lateralCells, cell, forwardMin, lateralMin, distance, walkable)
         }
     }
 }
@@ -130,6 +175,8 @@ data class MatchConfig(
     val trackAngleDeg: Double = 4.0,
     /** 걷는 중 바로잡기: 앞뒤로 옮겼을 때 점수가 이만큼 좋아져야 앞뒤를 고친다. 비슷하게 생긴 복도에서 미끄러지지 않게. */
     val forwardGain: Double = 0.05,
+    /** 위치가 걸을 수 있는 곳 밖으로 나가면 이 거리(m) 안의 가장 가까운 칸으로 당겨 온다. */
+    val snapM: Double = 3.0,
 )
 
 /** 지도 맞추기 결과. */
@@ -227,6 +274,7 @@ class MapMatcher(private val map: WallMap, private val config: MatchConfig = Mat
     /**
      * 걷는 중 바로잡기. 지금 변환([current]) 근처에서 점수가 가장 좋은 변환을 찾는다.
      * 점이 모자라거나 점수가 기준보다 낮으면 null. 앞뒤 위치는 점수가 뚜렷이 좋아질 때만 고친다.
+     * 카메라가 걸을 수 없는 곳에 놓이는 후보는 보지 않는다.
      */
     fun refine(points: DoubleArray, current: MapTransform, camX: Double, camZ: Double): MatchResult? {
         val xz = sample(points)
@@ -244,6 +292,7 @@ class MapMatcher(private val map: WallMap, private val config: MatchConfig = Mat
             while (df <= config.trackForwardM + 1e-9) {
                 var dl = -config.trackLateralM
                 while (dl <= config.trackLateralM + 1e-9) {
+                    if (!map.isWalkable(f0 + df, l0 + dl)) { dl += TRACK_LATERAL_STEP_M; continue }
                     val s = score(xz, MapTransform.placing(camX, camZ, f0 + df, l0 + dl, theta))
                     val c = Candidate(f0 + df, l0 + dl, theta, s)
                     if (best == null || s > best.score) best = c
@@ -253,12 +302,28 @@ class MapMatcher(private val map: WallMap, private val config: MatchConfig = Mat
                 df += TRACK_FORWARD_STEP_M
             }
         }
-        val chosen = if (best!!.score - bestSameForward!!.score >= config.forwardGain) best else bestSameForward
+        if (best == null || bestSameForward == null) return null
+        val chosen = if (best.score - bestSameForward.score >= config.forwardGain) best else bestSameForward
         if (chosen.score < config.acceptScore) return null
         return MatchResult(MapTransform.placing(camX, camZ, chosen.f, chosen.l, chosen.theta), chosen.score, n)
     }
 
-    /** 처음 위치 찾기에서 서 있을 수 있는 자리들(forward, lateral 순서로 이어 붙임). 벽에서 너무 가깝거나 먼 곳은 뺀다. */
+    /**
+     * 카메라 위치가 걸을 수 있는 곳 밖으로 나가면, 가장 가까운 걸을 수 있는 칸으로 옮긴 변환을 낸다(방향은 그대로).
+     * 이미 안이면 [current] 그대로. [MatchConfig.snapM] 안에 걸을 수 있는 칸이 없으면(지도 밖 멀리) 그대로 둔다.
+     */
+    fun constrain(current: MapTransform, camX: Double, camZ: Double): MapTransform {
+        val f = current.forward(camX, camZ)
+        val l = current.lateral(camX, camZ)
+        if (map.isWalkable(f, l)) return current
+        val (nf, nl) = map.nearestWalkable(f, l, config.snapM) ?: return current
+        return MapTransform(current.thetaRad, current.tf + (nf - f), current.tl + (nl - l))
+    }
+
+    /**
+     * 처음 위치 찾기에서 서 있을 수 있는 자리들(forward, lateral 순서로 이어 붙임).
+     * 걸을 수 있는 곳 지도가 있으면 그 안만, 없으면 벽에서 너무 가깝거나 먼 곳을 뺀 곳.
+     */
     private val standingSpotsCache: DoubleArray by lazy {
         val out = ArrayList<Double>()
         var f = map.forwardMin
@@ -266,7 +331,8 @@ class MapMatcher(private val map: WallMap, private val config: MatchConfig = Mat
             var l = map.lateralMin
             while (l < map.lateralMax) {
                 val d = map.distanceToWallM(f, l)
-                if (d >= config.minClearanceM && d <= config.maxClearanceM) { out += f; out += l }
+                val ok = if (map.hasWalkable) map.isWalkable(f, l) else d >= config.minClearanceM && d <= config.maxClearanceM
+                if (ok) { out += f; out += l }
                 l += config.globalStepM
             }
             f += config.globalStepM
