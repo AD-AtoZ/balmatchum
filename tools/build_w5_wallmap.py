@@ -108,7 +108,19 @@ def disk(r):
     return x * x + y * y <= r * r
 
 
-def build(src, mirror=True):
+def build(src, mirror=True, forward_range=None, lateral_range=None):
+    """지도 계산. forward_range·lateral_range를 주면 그 범위로 계산한다(뷰어가 스캔 전체를 메울 때). 앱 지도는 기본 범위."""
+    global FORWARD_RANGE, LATERAL_RANGE
+    saved = FORWARD_RANGE, LATERAL_RANGE
+    FORWARD_RANGE = tuple(forward_range) if forward_range else FORWARD_RANGE
+    LATERAL_RANGE = tuple(lateral_range) if lateral_range else LATERAL_RANGE
+    try:
+        return _build(src, mirror)
+    finally:
+        FORWARD_RANGE, LATERAL_RANGE = saved
+
+
+def _build(src, mirror):
     d = np.load(src)
     xy, zc = d["xy"], d["zc"]
     forward = START_Y - xy[:, 1]
