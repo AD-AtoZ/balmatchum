@@ -130,10 +130,14 @@ def build(src, mirror=True):
     floor_raw = count((zc >= FLOOR_HEIGHT[0]) & (zc <= FLOOR_HEIGHT[1])) > 0
     ceiling_raw = count(zc >= CEILING_MIN) > 0
 
-    wall = ndimage.binary_closing(wall_raw, structure=disk(WALL_GAP_CELLS)) | wall_raw | virtual_walls(nf, nl, mirror)
+    wall_closed = ndimage.binary_closing(wall_raw, structure=disk(WALL_GAP_CELLS)) | wall_raw
+    virtual = virtual_walls(nf, nl, mirror)
+    wall = wall_closed | virtual
     seen = floor_raw | ceiling_raw | wall
-    inside = ndimage.binary_closing(seen, structure=disk(INSIDE_GAP_CELLS)) | seen
-    inside = ndimage.binary_fill_holes(inside) | corridor_band(wall, nf, nl)
+    joined = ndimage.binary_closing(seen, structure=disk(INSIDE_GAP_CELLS)) | seen
+    holes_filled = ndimage.binary_fill_holes(joined)
+    band = corridor_band(wall, nf, nl)
+    inside = holes_filled | band
     walkable = inside & ~ndimage.binary_dilation(wall, structure=disk(WALL_MARGIN_CELLS))
     walkable |= route_core(nf, nl)
 
@@ -149,11 +153,22 @@ def build(src, mirror=True):
         "wall_raw": int(wall_raw.sum()), "wall": int(wall.sum()),
         "floor_raw": int(floor_raw.sum()), "ceiling_raw": int(ceiling_raw.sum()), "walkable": int(walkable.sum()),
     }
-    return nf, nl, distance, walkable.astype(np.uint8), wall_raw, wall, floor_raw | ceiling_raw, stats
+    # 무엇을 어떻게 메웠는지(뷰어에서 보여 줄 층). 바닥 메움은 바닥 점이 없는 안쪽 칸을 이유별로 나눈다.
+    floor_gap = inside & ~wall & ~floor_raw
+    layers = {
+        "wall_gap": wall_closed & ~wall_raw,               # 30cm 이하 벽 틈 잇기
+        "virtual_wall": virtual & ~wall_raw,               # 가상 벽
+        "floor_ceiling": floor_gap & ceiling_raw,          # 위에 천장이 찍혀 있어 안쪽으로 본 곳
+        "floor_join": floor_gap & ~ceiling_raw & joined,   # 50cm 이하 틈 잇기
+        "floor_hole": floor_gap & ~ceiling_raw & ~joined & holes_filled,  # 사방이 막힌 구멍 채우기
+        "floor_band": floor_gap & ~ceiling_raw & ~holes_filled,           # 경로 복도 띠
+        "walkable": walkable,
+    }
+    return nf, nl, distance, walkable.astype(np.uint8), wall_raw, wall, floor_raw | ceiling_raw, stats, layers
 
 
 def main(src, out, mirror=True, png=None):
-    nf, nl, distance, walkable, wall_raw, wall, floor_raw, stats = build(src, mirror)
+    nf, nl, distance, walkable, wall_raw, wall, floor_raw, stats, _ = build(src, mirror)
     with open(out, "wb") as f:
         f.write(b"BWM2")
         f.write(struct.pack("<iifff", nf, nl, CELL_M, FORWARD_RANGE[0], LATERAL_RANGE[0]))
