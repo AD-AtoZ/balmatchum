@@ -163,6 +163,8 @@ def build(src, mirror=True):
         "floor_hole": floor_gap & ~ceiling_raw & ~joined & holes_filled,  # 사방이 막힌 구멍 채우기
         "floor_band": floor_gap & ~ceiling_raw & ~holes_filled,           # 경로 복도 띠
         "walkable": walkable,
+        "inside": inside,          # 건물 안(벽 포함). 뷰어가 바닥·천장·벽 빈틈을 메울 범위
+        "wall": wall_closed,       # 벽(가상 벽 제외)
     }
     return nf, nl, distance, walkable.astype(np.uint8), wall_raw, wall, floor_raw | ceiling_raw, stats, layers
 
